@@ -114,19 +114,26 @@ export default function SettingsPage() {
     toast({ title: "保存成功" });
     setDialogOpen(false);
     fetchProviders();
+    window.dispatchEvent(new CustomEvent("model-settings-changed"));
   };
 
   const handleDelete = async (id: string) => {
     await supabase.from("model_providers").delete().eq("id", id);
     toast({ title: "已删除" });
     fetchProviders();
+    window.dispatchEvent(new CustomEvent("model-settings-changed"));
   };
 
   const setDefault = async (id: string) => {
     if (!user) return;
     await supabase.from("model_providers").update({ is_default: false }).eq("user_id", user.id);
     await supabase.from("model_providers").update({ is_default: true }).eq("id", id);
+    const provider = providers.find((p) => p.id === id);
+    if (provider) {
+      await supabase.from("profiles").update({ default_llm_model: provider.provider_type }).eq("user_id", user.id);
+    }
     fetchProviders();
+    window.dispatchEvent(new CustomEvent("model-settings-changed"));
     toast({ title: "已设为默认" });
   };
 

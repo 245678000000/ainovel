@@ -38,17 +38,26 @@ export default function NovelView() {
   const [loading, setLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamContent, setStreamContent] = useState("");
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const streamRef = useRef<HTMLDivElement>(null);
+
+  const loadProviders = async () => {
+    if (!user) return;
+    const [{ data: profile }, { data: providerData }] = await Promise.all([
+      supabase.from("profiles").select("default_llm_model").eq("user_id", user.id).single(),
+      supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled").eq("user_id", user.id),
+    ]);
+    if (profile) setDefaultModel(profile.default_llm_model || "deepseek");
+    if (providerData) setProviders(providerData);
+  };
 
   useEffect(() => {
     if (!id || !user) return;
     const fetchData = async () => {
-      const [novelRes, chaptersRes, profileRes] = await Promise.all([
+      const [novelRes, chaptersRes] = await Promise.all([
         supabase.from("novels").select("*").eq("id", id).single(),
         supabase.from("chapters").select("*").eq("novel_id", id).order("chapter_number"),
-        supabase.from("profiles").select("default_llm_model, api_keys_json").eq("user_id", user.id).single(),
       ]);
       if (novelRes.error) {
         toast({ title: "加载失败", description: novelRes.error.message, variant: "destructive" });
@@ -57,22 +66,38 @@ export default function NovelView() {
       setNovel(novelRes.data as Novel);
       setChapters((chaptersRes.data || []) as Chapter[]);
       if (chaptersRes.data?.length) setSelectedChapter(chaptersRes.data[0] as Chapter);
-      if (profileRes.data) {
-        setDefaultModel(profileRes.data.default_llm_model || "deepseek");
-        if (profileRes.data.api_keys_json && typeof profileRes.data.api_keys_json === "object") {
-          setApiKeys(profileRes.data.api_keys_json as Record<string, string>);
-        }
-      }
       setLoading(false);
     };
     fetchData();
+    loadProviders();
+
+    const onSettingsChanged = () => loadProviders();
+    window.addEventListener("model-settings-changed", onSettingsChanged);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadProviders();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("model-settings-changed", onSettingsChanged);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [id, user]);
 
   useEffect(() => {
     if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
   }, [streamContent]);
 
-  const currentApiKey = apiKeys[defaultModel] || "";
+  const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
+  const modelLower = defaultModel.toLowerCase();
+  const nameMatchedProvider = providers.find(
+    (p) =>
+      p.enabled !== false &&
+      (p.provider_type.toLowerCase() === modelLower ||
+        p.name.toLowerCase() === modelLower ||
+        (p.default_model && p.default_model.toLowerCase().includes(modelLower)))
+  );
+  const matchedProvider = defaultProvider || nameMatchedProvider;
+  const currentApiKey = matchedProvider?.api_key || "";
 
   const handleContinue = async () => {
     if (!novel || !session?.access_token || !currentApiKey) {

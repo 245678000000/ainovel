@@ -56,23 +56,37 @@ export default function Generate() {
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const abortRef = useRef(false);
 
-  // Load user settings (providers + profile)
+  const loadSettings = async () => {
+    if (!user) return;
+    const [{ data: profile }, { data: providerData }] = await Promise.all([
+      supabase.from("profiles").select("default_llm_model, nsfw_enabled").eq("user_id", user.id).single(),
+      supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled").eq("user_id", user.id),
+    ]);
+    if (profile) {
+      setDefaultModel(profile.default_llm_model || "deepseek");
+      setNsfw(profile.nsfw_enabled || false);
+    }
+    if (providerData) {
+      setProviders(providerData);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
-    const load = async () => {
-      const [{ data: profile }, { data: providerData }] = await Promise.all([
-        supabase.from("profiles").select("default_llm_model, nsfw_enabled").eq("user_id", user.id).single(),
-        supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled").eq("user_id", user.id),
-      ]);
-      if (profile) {
-        setDefaultModel(profile.default_llm_model || "deepseek");
-        setNsfw(profile.nsfw_enabled || false);
-      }
-      if (providerData) {
-        setProviders(providerData);
-      }
+    loadSettings();
+
+    const onSettingsChanged = () => loadSettings();
+    window.addEventListener("model-settings-changed", onSettingsChanged);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadSettings();
     };
-    load();
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.removeEventListener("model-settings-changed", onSettingsChanged);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [user]);
 
   // Auto-scroll preview
@@ -102,17 +116,22 @@ export default function Generate() {
     harem,
   });
 
-  // Find matching provider (case-insensitive, check provider_type, name, and default_model)
+  const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
   const modelLower = defaultModel.toLowerCase();
-  const matchedProvider = providers.find(
+  const nameMatchedProvider = providers.find(
     (p) =>
       p.enabled !== false &&
       (p.provider_type.toLowerCase() === modelLower ||
         p.name.toLowerCase() === modelLower ||
         (p.default_model && p.default_model.toLowerCase().includes(modelLower)))
-  ) || providers.find((p) => p.is_default && p.enabled !== false);
+  );
+  const matchedProvider = defaultProvider || nameMatchedProvider;
   const currentApiKey = matchedProvider?.api_key || "";
-  const displayModelName = PROVIDER_TYPES.find((p) => p.value.toLowerCase() === modelLower)?.label || defaultModel;
+  const activeModelType = matchedProvider?.provider_type || defaultModel;
+  const displayModelName =
+    PROVIDER_TYPES.find((p) => p.value.toLowerCase() === activeModelType.toLowerCase())?.label ||
+    matchedProvider?.name ||
+    defaultModel;
 
   const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
     if (!currentApiKey) {
