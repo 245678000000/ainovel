@@ -84,6 +84,51 @@ export type Database = {
           },
         ]
       }
+      model_providers: {
+        Row: {
+          api_base_url: string | null
+          api_key: string | null
+          config_json: Json | null
+          created_at: string
+          default_model: string | null
+          enabled: boolean | null
+          id: string
+          is_default: boolean | null
+          name: string
+          provider_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_base_url?: string | null
+          api_key?: string | null
+          config_json?: Json | null
+          created_at?: string
+          default_model?: string | null
+          enabled?: boolean | null
+          id?: string
+          is_default?: boolean | null
+          name: string
+          provider_type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_base_url?: string | null
+          api_key?: string | null
+          config_json?: Json | null
+          created_at?: string
+          default_model?: string | null
+          enabled?: boolean | null
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          provider_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       novels: {
         Row: {
           created_at: string

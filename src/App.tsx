@@ -12,6 +12,7 @@ import Generate from "./pages/Generate";
 import Library from "./pages/Library";
 import NovelView from "./pages/NovelView";
 import SettingsPage from "./pages/SettingsPage";
+import ProvidersPage from "./pages/ProvidersPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ const App = () => (
               <Route path="/library" element={<AppLayout><Library /></AppLayout>} />
               <Route path="/novel/:id" element={<AppLayout><NovelView /></AppLayout>} />
               <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
+              <Route path="/providers" element={<AppLayout><ProvidersPage /></AppLayout>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
