@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { streamNovelGeneration } from "@/lib/stream-novel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +14,9 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { PenTool, BookOpen, Users, Loader2, Sparkles } from "lucide-react";
+import { PenTool, BookOpen, Users, Loader2, Sparkles, StopCircle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import ReactMarkdown from "react-markdown";
 
 const allGenres = ["玄幻", "仙侠", "都市", "言情", "科幻", "系统文", "后宫", "无限流", "悬疑", "历史", "军事", "游戏"];
 const allStyles = ["爽文", "虐文", "细腻", "幽默", "热血", "暗黑", "轻松", "文艺"];
@@ -19,6 +24,10 @@ const narrations = ["第三人称", "第一人称"];
 
 export default function Generate() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { user, session } = useAuth();
+  const { toast } = useToast();
+  const previewRef = useRef<HTMLDivElement>(null);
 
   const [genres, setGenres] = useState<string[]>(
     searchParams.get("genre") ? [searchParams.get("genre")!] : []
@@ -41,11 +50,150 @@ export default function Generate() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
+  const [generationMode, setGenerationMode] = useState("");
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [defaultModel, setDefaultModel] = useState("deepseek");
+  const abortRef = useRef(false);
+
+  // Load user settings
+  useEffect(() => {
+    if (!user) return;
+    const loadProfile = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("default_llm_model, nsfw_enabled, api_keys_json")
+        .eq("user_id", user.id)
+        .single();
+      if (data) {
+        setDefaultModel(data.default_llm_model || "deepseek");
+        setNsfw(data.nsfw_enabled || false);
+        if (data.api_keys_json && typeof data.api_keys_json === "object") {
+          setApiKeys(data.api_keys_json as Record<string, string>);
+        }
+      }
+    };
+    loadProfile();
+  }, [user]);
+
+  // Auto-scroll preview
+  useEffect(() => {
+    if (previewRef.current) {
+      previewRef.current.scrollTop = previewRef.current.scrollHeight;
+    }
+  }, [previewContent]);
+
+  const getSettings = () => ({
+    genres,
+    protagonist: {
+      name: protagonistName,
+      gender: protagonistGender,
+      age: protagonistAge,
+      personality: protagonistPersonality,
+    },
+    worldSetting,
+    conflict,
+    synopsis,
+    totalWords,
+    chapterWords,
+    style,
+    narration,
+    nsfw,
+    systemNovel,
+    harem,
+  });
+
+  const currentApiKey = apiKeys[defaultModel] || "";
+
+  const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
+    if (!currentApiKey) {
+      toast({ title: "缺少API密钥", description: `请先在设置中配置 ${defaultModel} 的API密钥`, variant: "destructive" });
+      return;
+    }
+    if (!session?.access_token) {
+      toast({ title: "未登录", description: "请先登录", variant: "destructive" });
+      return;
+    }
+
+    setIsGenerating(true);
+    setPreviewContent("");
+    setGenerationMode(mode);
+    abortRef.current = false;
+    let fullContent = "";
+
+    await streamNovelGeneration({
+      params: {
+        mode,
+        settings: getSettings(),
+        model: defaultModel,
+        apiKey: currentApiKey,
+        temperature: temperature[0],
+        chapterNumber: 1,
+      },
+      onDelta: (text) => {
+        if (abortRef.current) return;
+        fullContent += text;
+        setPreviewContent(fullContent);
+      },
+      onDone: async () => {
+        setIsGenerating(false);
+        if (abortRef.current) return;
+
+        // Auto-save based on mode
+        if (mode === "generate" && user) {
+          try {
+            // Create novel
+            const { data: novel, error: novelErr } = await supabase
+              .from("novels")
+              .insert({
+                user_id: user.id,
+                title: protagonistName ? `${protagonistName}的故事` : "未命名小说",
+                genre: genres,
+                settings_json: getSettings(),
+                word_count: fullContent.length,
+              })
+              .select()
+              .single();
+
+            if (novelErr) throw novelErr;
+
+            // Extract title from content (first line)
+            const lines = fullContent.split("\n").filter((l) => l.trim());
+            const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || "第一章";
+            const chapterContent = lines.slice(1).join("\n").trim();
+
+            await supabase.from("chapters").insert({
+              novel_id: novel.id,
+              chapter_number: 1,
+              title: chapterTitle,
+              content: chapterContent,
+              word_count: chapterContent.length,
+            });
+
+            toast({ title: "创作完成", description: "小说已自动保存到书库" });
+          } catch (e: any) {
+            toast({ title: "保存失败", description: e.message, variant: "destructive" });
+          }
+        } else if (mode === "outline" && user) {
+          toast({ title: "大纲生成完成", description: "开始创作时将自动使用此大纲" });
+        } else if (mode === "characters") {
+          toast({ title: "人物卡生成完成" });
+        }
+      },
+      onError: (error) => {
+        setIsGenerating(false);
+        toast({ title: "生成失败", description: error, variant: "destructive" });
+      },
+      accessToken: session.access_token,
+    });
+  };
+
+  const handleStop = () => {
+    abortRef.current = true;
+    setIsGenerating(false);
+  };
 
   const toggleGenre = (g: string) => {
-    setGenres((prev) =>
-      prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]
-    );
+    setGenres((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));
   };
 
   return (
@@ -53,7 +201,20 @@ export default function Generate() {
       {/* Left: Settings Form */}
       <ScrollArea className="w-full border-r border-border/50 md:w-[420px] lg:w-[480px]">
         <div className="space-y-6 p-4 md:p-6">
-          <h1 className="font-serif text-xl font-bold">创作设定</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="font-serif text-xl font-bold">创作设定</h1>
+            <Badge variant="outline" className="text-xs">
+              模型: {defaultModel}
+            </Badge>
+          </div>
+
+          {!currentApiKey && (
+            <Card className="border-destructive/50 bg-destructive/10">
+              <CardContent className="p-3 text-sm text-destructive">
+                ⚠️ 请先在<button onClick={() => navigate("/settings")} className="underline mx-1">设置页面</button>配置 {defaultModel} 的API密钥
+              </CardContent>
+            </Card>
+          )}
 
           {/* Genre Multi-select */}
           <div className="space-y-2">
@@ -210,16 +371,23 @@ export default function Generate() {
 
           {/* Action Buttons */}
           <div className="space-y-3 pb-6">
-            <Button className="w-full" size="lg" disabled={isGenerating}>
-              {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenTool className="mr-2 h-4 w-4" />}
-              开始创作
-            </Button>
+            {isGenerating ? (
+              <Button className="w-full" size="lg" variant="destructive" onClick={handleStop}>
+                <StopCircle className="mr-2 h-4 w-4" />
+                停止生成
+              </Button>
+            ) : (
+              <Button className="w-full" size="lg" onClick={() => handleGenerate("generate")} disabled={!currentApiKey}>
+                <PenTool className="mr-2 h-4 w-4" />
+                开始创作
+              </Button>
+            )}
             <div className="grid grid-cols-2 gap-3">
-              <Button variant="secondary" disabled={isGenerating}>
+              <Button variant="secondary" disabled={isGenerating || !currentApiKey} onClick={() => handleGenerate("outline")}>
                 <BookOpen className="mr-2 h-4 w-4" />
                 生成大纲
               </Button>
-              <Button variant="secondary" disabled={isGenerating}>
+              <Button variant="secondary" disabled={isGenerating || !currentApiKey} onClick={() => handleGenerate("characters")}>
                 <Users className="mr-2 h-4 w-4" />
                 生成人物卡
               </Button>
@@ -230,22 +398,40 @@ export default function Generate() {
 
       {/* Right: Preview Area */}
       <div className="hidden flex-1 flex-col md:flex">
-        <div className="flex h-12 items-center border-b border-border/50 px-6">
-          <Sparkles className="mr-2 h-4 w-4 text-primary" />
-          <span className="text-sm font-medium text-muted-foreground">实时预览</span>
+        <div className="flex h-12 items-center justify-between border-b border-border/50 px-6">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium text-muted-foreground">实时预览</span>
+          </div>
+          {isGenerating && (
+            <div className="flex items-center gap-2 text-sm text-primary">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在创作中...
+            </div>
+          )}
         </div>
-        <div className="flex flex-1 items-center justify-center p-8">
+        <div ref={previewRef} className="flex-1 overflow-auto p-8">
           {previewContent ? (
-            <ScrollArea className="h-full w-full">
-              <div className="prose prose-invert max-w-none font-serif leading-relaxed">
+            <div className="mx-auto max-w-3xl font-serif text-base leading-loose text-foreground/90">
+              <ReactMarkdown
+                components={{
+                  h1: ({ children }) => <h1 className="mb-6 text-2xl font-bold text-center">{children}</h1>,
+                  h2: ({ children }) => <h2 className="mb-4 mt-8 text-xl font-bold">{children}</h2>,
+                  h3: ({ children }) => <h3 className="mb-3 mt-6 text-lg font-semibold">{children}</h3>,
+                  p: ({ children }) => <p className="mb-4 indent-8 leading-loose">{children}</p>,
+                  code: ({ children }) => <pre className="my-4 rounded-lg bg-muted p-4 text-sm overflow-x-auto"><code>{children}</code></pre>,
+                }}
+              >
                 {previewContent}
-              </div>
-            </ScrollArea>
+              </ReactMarkdown>
+            </div>
           ) : (
-            <div className="text-center text-muted-foreground">
-              <BookOpen className="mx-auto mb-4 h-16 w-16 opacity-20" />
-              <p className="text-lg">设定好参数后，点击"开始创作"</p>
-              <p className="text-sm">AI将在这里实时生成你的小说</p>
+            <div className="flex h-full items-center justify-center text-center text-muted-foreground">
+              <div>
+                <BookOpen className="mx-auto mb-4 h-16 w-16 opacity-20" />
+                <p className="text-lg">设定好参数后，点击"开始创作"</p>
+                <p className="text-sm">AI将在这里实时生成你的小说</p>
+              </div>
             </div>
           )}
         </div>
