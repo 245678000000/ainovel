@@ -122,6 +122,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          api_keys_json: Json | null
           created_at: string
           default_llm_model: string | null
           display_name: string | null
@@ -131,6 +132,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          api_keys_json?: Json | null
           created_at?: string
           default_llm_model?: string | null
           display_name?: string | null
@@ -140,6 +142,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          api_keys_json?: Json | null
           created_at?: string
           default_llm_model?: string | null
           display_name?: string | null

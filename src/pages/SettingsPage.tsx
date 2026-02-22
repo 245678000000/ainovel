@@ -22,7 +22,7 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const [nsfw, setNsfw] = useState(false);
-  const [apiKeys, setApiKeys] = useState({
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({
     deepseek: "",
     claude: "",
     grok: "",
@@ -33,28 +33,40 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!user) return;
-    const fetch = async () => {
+    const fetchProfile = async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("default_llm_model, nsfw_enabled")
+        .select("default_llm_model, nsfw_enabled, api_keys_json")
         .eq("user_id", user.id)
         .single();
       if (data) {
         setDefaultModel(data.default_llm_model || "deepseek");
         setNsfw(data.nsfw_enabled || false);
+        if (data.api_keys_json && typeof data.api_keys_json === "object") {
+          const keys = data.api_keys_json as Record<string, string>;
+          setApiKeys((prev) => ({ ...prev, ...keys }));
+        }
       }
     };
-    fetch();
+    fetchProfile();
   }, [user]);
 
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
+
+    // Filter out empty keys
+    const filteredKeys: Record<string, string> = {};
+    for (const [k, v] of Object.entries(apiKeys)) {
+      if (v.trim()) filteredKeys[k] = v.trim();
+    }
+
     const { error } = await supabase
       .from("profiles")
       .update({
         default_llm_model: defaultModel,
         nsfw_enabled: nsfw,
+        api_keys_json: filteredKeys,
       })
       .eq("user_id", user.id);
 
@@ -94,7 +106,7 @@ export default function SettingsPage() {
       <Card className="glass">
         <CardHeader>
           <CardTitle className="text-lg">API 密钥</CardTitle>
-          <CardDescription>输入各模型的API密钥（安全存储于浏览器本地，后续将迁移至后端安全存储）</CardDescription>
+          <CardDescription>输入各模型的API密钥，安全存储于数据库中</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {models.map((m) => (
@@ -104,7 +116,7 @@ export default function SettingsPage() {
                 <Input
                   type={showKeys[m.value] ? "text" : "password"}
                   placeholder={`输入 ${m.label} API Key`}
-                  value={apiKeys[m.value as keyof typeof apiKeys]}
+                  value={apiKeys[m.value] || ""}
                   onChange={(e) => setApiKeys((prev) => ({ ...prev, [m.value]: e.target.value }))}
                 />
                 <button
@@ -118,7 +130,7 @@ export default function SettingsPage() {
             </div>
           ))}
           <p className="text-xs text-muted-foreground">
-            注意：API密钥目前暂存于本地，第二阶段将通过后端函数安全调用
+            密钥通过Edge Function在服务端使用，不会暴露给前端
           </p>
         </CardContent>
       </Card>
