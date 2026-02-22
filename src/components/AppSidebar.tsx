@@ -1,6 +1,5 @@
-import { Home, PenTool, Library, Settings, LogOut, BookOpen } from "lucide-react";
+import { Home, PenTool, Library, Settings, BookOpen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useAuth } from "@/lib/auth";
 import {
   Sidebar,
   SidebarContent,
@@ -9,7 +8,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
 
@@ -21,8 +19,6 @@ const navItems = [
 ];
 
 export function AppSidebar() {
-  const { signOut, user } = useAuth();
-
   return (
     <Sidebar className="border-r border-border/50">
       <SidebarHeader className="p-4">
@@ -59,18 +55,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4">
-        <div className="text-xs text-muted-foreground truncate mb-2">
-          {user?.email}
-        </div>
-        <button
-          onClick={signOut}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-        >
-          <LogOut className="h-4 w-4" />
-          <span>退出登录</span>
-        </button>
-      </SidebarFooter>
     </Sidebar>
   );
 }

@@ -7,7 +7,6 @@ import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/auth";
 import { AppLayout } from "@/components/AppLayout";
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
 import Generate from "./pages/Generate";
 import Library from "./pages/Library";
 import NovelView from "./pages/NovelView";
@@ -25,7 +24,6 @@ const App = () => (
         <BrowserRouter>
           <AuthProvider>
             <Routes>
-              <Route path="/auth" element={<Auth />} />
               <Route path="/" element={<AppLayout><Index /></AppLayout>} />
               <Route path="/generate" element={<AppLayout><Generate /></AppLayout>} />
               <Route path="/library" element={<AppLayout><Library /></AppLayout>} />
