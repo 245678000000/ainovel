@@ -38,7 +38,7 @@ export default function NovelView() {
   const [loading, setLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamContent, setStreamContent] = useState("");
-  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null }[]>([]);
+  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null; api_base_url: string | null }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const streamRef = useRef<HTMLDivElement>(null);
 
@@ -46,10 +46,18 @@ export default function NovelView() {
     if (!user) return;
     const [{ data: profile }, { data: providerData }] = await Promise.all([
       supabase.from("profiles").select("default_llm_model").eq("user_id", user.id).single(),
-      supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled").eq("user_id", user.id),
+      supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled, api_base_url").eq("user_id", user.id),
     ]);
-    if (profile) setDefaultModel(profile.default_llm_model || "deepseek");
     if (providerData) setProviders(providerData);
+    if (profile) {
+      let model = profile.default_llm_model;
+      if (!model && providerData && providerData.length > 0) {
+        const def = providerData.find((p) => p.is_default && p.enabled !== false);
+        const first = providerData.find((p) => p.enabled !== false);
+        model = (def || first)?.provider_type || null;
+      }
+      setDefaultModel(model || "deepseek");
+    }
   };
 
   useEffect(() => {
@@ -114,6 +122,8 @@ export default function NovelView() {
         settings: novel.settings_json || {},
         model: defaultModel,
         apiKey: currentApiKey,
+        apiBaseUrl: matchedProvider?.api_base_url || undefined,
+        actualModel: matchedProvider?.default_model || undefined,
         novelId: novel.id,
       },
       onDelta: (text) => {
@@ -171,6 +181,8 @@ export default function NovelView() {
         settings: novel.settings_json || {},
         model: defaultModel,
         apiKey: currentApiKey,
+        apiBaseUrl: matchedProvider?.api_base_url || undefined,
+        actualModel: matchedProvider?.default_model || undefined,
         rewriteContent: selectedChapter.content,
       },
       onDelta: (text) => {

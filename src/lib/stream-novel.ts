@@ -5,6 +5,8 @@ export interface StreamNovelParams {
   settings: Record<string, any>;
   model: string;
   apiKey: string;
+  apiBaseUrl?: string;
+  actualModel?: string;
   temperature?: number;
   novelId?: string;
   chapterNumber?: number;
