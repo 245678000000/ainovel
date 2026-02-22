@@ -1,4 +1,4 @@
-import { Home, PenTool, Library, Settings, LogOut, BookOpen, Cpu } from "lucide-react";
+import { Home, PenTool, Library, Settings, LogOut, BookOpen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import {
@@ -17,8 +17,7 @@ const navItems = [
   { title: "首页", url: "/", icon: Home },
   { title: "开始创作", url: "/generate", icon: PenTool },
   { title: "我的书库", url: "/library", icon: Library },
-  { title: "模型提供商", url: "/providers", icon: Cpu },
-  { title: "设置", url: "/settings", icon: Settings },
+  { title: "模型设置", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
