@@ -52,7 +52,7 @@ export default function Generate() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
   const [generationMode, setGenerationMode] = useState("");
-  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string }[]>([]);
+  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const abortRef = useRef(false);
 
@@ -62,7 +62,7 @@ export default function Generate() {
     const load = async () => {
       const [{ data: profile }, { data: providerData }] = await Promise.all([
         supabase.from("profiles").select("default_llm_model, nsfw_enabled").eq("user_id", user.id).single(),
-        supabase.from("model_providers").select("provider_type, api_key, is_default, name").eq("user_id", user.id),
+        supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled").eq("user_id", user.id),
       ]);
       if (profile) {
         setDefaultModel(profile.default_llm_model || "deepseek");
@@ -102,12 +102,17 @@ export default function Generate() {
     harem,
   });
 
-  // Find matching provider (case-insensitive)
+  // Find matching provider (case-insensitive, check provider_type, name, and default_model)
+  const modelLower = defaultModel.toLowerCase();
   const matchedProvider = providers.find(
-    (p) => p.provider_type.toLowerCase() === defaultModel.toLowerCase() || p.name.toLowerCase() === defaultModel.toLowerCase()
-  );
+    (p) =>
+      p.enabled !== false &&
+      (p.provider_type.toLowerCase() === modelLower ||
+        p.name.toLowerCase() === modelLower ||
+        (p.default_model && p.default_model.toLowerCase().includes(modelLower)))
+  ) || providers.find((p) => p.is_default && p.enabled !== false);
   const currentApiKey = matchedProvider?.api_key || "";
-  const displayModelName = PROVIDER_TYPES.find((p) => p.value.toLowerCase() === defaultModel.toLowerCase())?.label || defaultModel;
+  const displayModelName = PROVIDER_TYPES.find((p) => p.value.toLowerCase() === modelLower)?.label || defaultModel;
 
   const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
     if (!currentApiKey) {
