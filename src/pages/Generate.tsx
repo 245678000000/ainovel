@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { streamNovelGeneration } from "@/lib/stream-novel";
+import { PROVIDER_TYPES } from "@/lib/provider-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,28 +52,27 @@ export default function Generate() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
   const [generationMode, setGenerationMode] = useState("");
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const abortRef = useRef(false);
 
-  // Load user settings
+  // Load user settings (providers + profile)
   useEffect(() => {
     if (!user) return;
-    const loadProfile = async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("default_llm_model, nsfw_enabled, api_keys_json")
-        .eq("user_id", user.id)
-        .single();
-      if (data) {
-        setDefaultModel(data.default_llm_model || "deepseek");
-        setNsfw(data.nsfw_enabled || false);
-        if (data.api_keys_json && typeof data.api_keys_json === "object") {
-          setApiKeys(data.api_keys_json as Record<string, string>);
-        }
+    const load = async () => {
+      const [{ data: profile }, { data: providerData }] = await Promise.all([
+        supabase.from("profiles").select("default_llm_model, nsfw_enabled").eq("user_id", user.id).single(),
+        supabase.from("model_providers").select("provider_type, api_key, is_default, name").eq("user_id", user.id),
+      ]);
+      if (profile) {
+        setDefaultModel(profile.default_llm_model || "deepseek");
+        setNsfw(profile.nsfw_enabled || false);
+      }
+      if (providerData) {
+        setProviders(providerData);
       }
     };
-    loadProfile();
+    load();
   }, [user]);
 
   // Auto-scroll preview
@@ -102,7 +102,12 @@ export default function Generate() {
     harem,
   });
 
-  const currentApiKey = apiKeys[defaultModel] || "";
+  // Find matching provider (case-insensitive)
+  const matchedProvider = providers.find(
+    (p) => p.provider_type.toLowerCase() === defaultModel.toLowerCase() || p.name.toLowerCase() === defaultModel.toLowerCase()
+  );
+  const currentApiKey = matchedProvider?.api_key || "";
+  const displayModelName = PROVIDER_TYPES.find((p) => p.value.toLowerCase() === defaultModel.toLowerCase())?.label || defaultModel;
 
   const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
     if (!currentApiKey) {
@@ -204,14 +209,14 @@ export default function Generate() {
           <div className="flex items-center justify-between">
             <h1 className="font-serif text-xl font-bold">创作设定</h1>
             <Badge variant="outline" className="text-xs">
-              模型: {defaultModel}
+              模型: {displayModelName}
             </Badge>
           </div>
 
           {!currentApiKey && (
             <Card className="border-destructive/50 bg-destructive/10">
               <CardContent className="p-3 text-sm text-destructive">
-                ⚠️ 请先在<button onClick={() => navigate("/settings")} className="underline mx-1">设置页面</button>配置 {defaultModel} 的API密钥
+                ⚠️ 请先前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>配置 {displayModelName} 的 API Key
               </CardContent>
             </Card>
           )}
