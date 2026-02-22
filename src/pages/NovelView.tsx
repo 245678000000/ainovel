@@ -108,8 +108,8 @@ export default function NovelView() {
   const currentApiKey = matchedProvider?.api_key || "";
 
   const handleContinue = async () => {
-    if (!novel || !session?.access_token || !currentApiKey) {
-      toast({ title: "操作失败", description: !currentApiKey ? "请先配置API密钥" : "请先登录", variant: "destructive" });
+    if (!novel || !session?.access_token) {
+      toast({ title: "操作失败", description: "请先登录", variant: "destructive" });
       return;
     }
     setIsGenerating(true);
@@ -170,7 +170,7 @@ export default function NovelView() {
   };
 
   const handleRewrite = async () => {
-    if (!selectedChapter || !novel || !session?.access_token || !currentApiKey) return;
+    if (!selectedChapter || !novel || !session?.access_token) return;
     setIsGenerating(true);
     setStreamContent("");
     let fullContent = "";
@@ -331,15 +331,15 @@ export default function NovelView() {
         </div>
         {/* Action bar */}
         <div className="flex items-center justify-center gap-3 border-t border-border/50 px-4 py-3">
-          <Button variant="secondary" disabled={isGenerating || !currentApiKey} onClick={handleContinue}>
+          <Button variant="secondary" disabled={isGenerating} onClick={handleContinue}>
             {isGenerating && !streamContent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenTool className="mr-2 h-4 w-4" />}
             继续写作
           </Button>
-          <Button variant="outline" disabled={isGenerating || !selectedChapter || !currentApiKey} onClick={handleRewrite}>
+          <Button variant="outline" disabled={isGenerating || !selectedChapter} onClick={handleRewrite}>
             <RotateCcw className="mr-2 h-4 w-4" />
             重写本章
           </Button>
-          <Button variant="outline" disabled={isGenerating || !currentApiKey} onClick={handleContinue}>
+          <Button variant="outline" disabled={isGenerating} onClick={handleContinue}>
             <ChevronRight className="mr-2 h-4 w-4" />
             生成下一章
           </Button>

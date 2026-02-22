@@ -140,10 +140,6 @@ export default function Generate() {
     defaultModel;
 
   const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
-    if (!currentApiKey) {
-      toast({ title: "缺少API密钥", description: `请先在设置中配置 ${defaultModel} 的API密钥`, variant: "destructive" });
-      return;
-    }
     if (!session?.access_token) {
       toast({ title: "未登录", description: "请先登录", variant: "destructive" });
       return;
@@ -246,9 +242,9 @@ export default function Generate() {
           </div>
 
           {!currentApiKey && (
-            <Card className="border-destructive/50 bg-destructive/10">
-              <CardContent className="p-3 text-sm text-destructive">
-                ⚠️ 请先前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>配置 {displayModelName} 的 API Key
+            <Card className="border-green-500/50 bg-green-500/10">
+              <CardContent className="p-3 text-sm text-green-700 dark:text-green-400">
+                ✨ 当前使用免费默认模型 Grok，如需使用自己的模型请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>配置
               </CardContent>
             </Card>
           )}
@@ -414,17 +410,17 @@ export default function Generate() {
                 停止生成
               </Button>
             ) : (
-              <Button className="w-full" size="lg" onClick={() => handleGenerate("generate")} disabled={!currentApiKey}>
+              <Button className="w-full" size="lg" onClick={() => handleGenerate("generate")}>
                 <PenTool className="mr-2 h-4 w-4" />
                 开始创作
               </Button>
             )}
             <div className="grid grid-cols-2 gap-3">
-              <Button variant="secondary" disabled={isGenerating || !currentApiKey} onClick={() => handleGenerate("outline")}>
+              <Button variant="secondary" disabled={isGenerating} onClick={() => handleGenerate("outline")}>
                 <BookOpen className="mr-2 h-4 w-4" />
                 生成大纲
               </Button>
-              <Button variant="secondary" disabled={isGenerating || !currentApiKey} onClick={() => handleGenerate("characters")}>
+              <Button variant="secondary" disabled={isGenerating} onClick={() => handleGenerate("characters")}>
                 <Users className="mr-2 h-4 w-4" />
                 生成人物卡
               </Button>
