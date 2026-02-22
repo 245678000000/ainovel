@@ -11,7 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Pencil, Trash2, Eye, EyeOff, Star, Zap, FlaskConical, Save } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, EyeOff, Star, Zap, FlaskConical, Save, X } from "lucide-react";
+
+const CUSTOM_MODELS_KEY = "custom_models";
+const getCustomModels = (): string[] => {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_MODELS_KEY) || "[]"); } catch { return []; }
+};
+const saveCustomModels = (models: string[]) => localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(models));
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -28,6 +34,9 @@ export default function SettingsPage() {
   const [editing, setEditing] = useState<ModelProvider | null>(null);
   const [testing, setTesting] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [customModels, setCustomModels] = useState<string[]>(getCustomModels());
+  const [customModelDialog, setCustomModelDialog] = useState(false);
+  const [newModelName, setNewModelName] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -304,18 +313,64 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="font-semibold">默认模型</Label>
-              {selectedType && selectedType.models.length > 0 ? (
-                <Select value={form.default_model} onValueChange={(v) => setForm((f) => ({ ...f, default_model: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {selectedType.models.map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input value={form.default_model} onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))} placeholder="输入模型名称" />
-              )}
+              {(() => {
+                const builtinModels = selectedType?.models || [];
+                const allModels = [...builtinModels, ...customModels];
+                return allModels.length > 0 ? (
+                  <Select
+                    value={form.default_model}
+                    onValueChange={(v) => {
+                      if (v === "__add_custom__") { setNewModelName(""); setCustomModelDialog(true); return; }
+                      setForm((f) => ({ ...f, default_model: v }));
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="选择模型" /></SelectTrigger>
+                    <SelectContent>
+                      {builtinModels.map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                      {customModels.map((m) => (
+                        <SelectItem key={`custom-${m}`} value={m}>
+                          <span className="flex items-center justify-between w-full gap-2">
+                            {m}
+                            <button
+                              className="ml-2 text-destructive hover:text-destructive/80"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const updated = customModels.filter((c) => c !== m);
+                                setCustomModels(updated);
+                                saveCustomModels(updated);
+                                if (form.default_model === m) setForm((f) => ({ ...f, default_model: builtinModels[0] || "" }));
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__add_custom__" className="text-primary font-medium">
+                        <span className="flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> 添加自定义模型</span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="space-y-2">
+                    <Input value={form.default_model} onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))} placeholder="输入模型名称" />
+                    {customModels.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {customModels.map((m) => (
+                          <button key={m} onClick={() => setForm((f) => ({ ...f, default_model: m }))} className="text-xs px-2 py-0.5 rounded-full border border-primary/30 text-primary hover:bg-primary/10">
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <Button variant="ghost" size="sm" className="text-primary gap-1 px-0" onClick={() => { setNewModelName(""); setCustomModelDialog(true); }}>
+                      <Plus className="h-3.5 w-3.5" /> 添加自定义模型
+                    </Button>
+                  </div>
+                );
+              })()}
             </div>
             <div className="space-y-4 rounded-lg border border-border p-4">
               <h4 className="text-sm font-medium text-muted-foreground">生成参数</h4>
@@ -343,6 +398,47 @@ export default function SettingsPage() {
               <Switch checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
             </div>
             <Button onClick={handleSaveProvider} className="w-full">保存</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Model Dialog */}
+      <Dialog open={customModelDialog} onOpenChange={setCustomModelDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-serif">添加自定义模型</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <Input
+              value={newModelName}
+              onChange={(e) => setNewModelName(e.target.value)}
+              placeholder="输入模型名称，例如 claude-3-5-sonnet-20241022"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newModelName.trim()) {
+                  const updated = [...customModels, newModelName.trim()];
+                  setCustomModels(updated);
+                  saveCustomModels(updated);
+                  setForm((f) => ({ ...f, default_model: newModelName.trim() }));
+                  setCustomModelDialog(false);
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground">支持 OpenAI、Claude、DeepSeek、Grok 等任意兼容模型</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCustomModelDialog(false)}>取消</Button>
+              <Button
+                disabled={!newModelName.trim()}
+                onClick={() => {
+                  const updated = [...customModels, newModelName.trim()];
+                  setCustomModels(updated);
+                  saveCustomModels(updated);
+                  setForm((f) => ({ ...f, default_model: newModelName.trim() }));
+                  setCustomModelDialog(false);
+                }}
+              >
+                保存
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
