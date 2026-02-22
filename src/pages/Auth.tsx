@@ -9,7 +9,6 @@ import { useToast } from "@/hooks/use-toast";
 import { BookOpen, Mail, Lock, User } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useEffect } from "react";
-import { lovable } from "@/integrations/lovable/index";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -121,8 +120,11 @@ export default function Auth() {
             onClick={async () => {
               setLoading(true);
               try {
-                const { error } = await lovable.auth.signInWithOAuth("google", {
-                  redirect_uri: window.location.origin,
+                const { error } = await supabase.auth.signInWithOAuth({
+                  provider: "google",
+                  options: {
+                    redirectTo: window.location.origin,
+                  },
                 });
                 if (error) throw error;
               } catch (error: any) {
