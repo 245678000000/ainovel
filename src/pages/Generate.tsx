@@ -130,28 +130,19 @@ export default function Generate() {
     harem,
   });
 
+  // 优先匹配 is_default 的提供商，其次按 provider_type 精确匹配
   const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
-  const modelLower = defaultModel.toLowerCase();
-  const nameMatchedProvider = providers.find(
-    (p) =>
-      p.enabled !== false &&
-      (p.provider_type.toLowerCase() === modelLower ||
-        p.name.toLowerCase() === modelLower ||
-        (p.default_model && p.default_model.toLowerCase().includes(modelLower)))
+  const typeMatchedProvider = providers.find(
+    (p) => p.enabled !== false && p.provider_type.toLowerCase() === defaultModel.toLowerCase()
   );
-  const matchedProvider = defaultProvider || nameMatchedProvider;
+  const firstEnabledProvider = providers.find((p) => p.enabled !== false);
+  const matchedProvider = defaultProvider || typeMatchedProvider || firstEnabledProvider;
   const currentApiKey = matchedProvider?.api_key || "";
   const activeModelType = matchedProvider?.provider_type || defaultModel;
-  const hasProviderKey = Boolean(currentApiKey);
-  const effectiveProvider = hasProviderKey ? activeModelType : "grok";
-  const effectiveApiBaseUrl =
-    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
-      ? undefined
-      : matchedProvider?.api_base_url || undefined;
-  const effectiveActualModel =
-    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
-      ? undefined
-      : matchedProvider?.default_model || undefined;
+  // 不再强制 fallback 到 grok，直接使用用户配置的提供商，让后端判断是否缺 Key
+  const effectiveProvider = activeModelType;
+  const effectiveApiBaseUrl = matchedProvider?.api_base_url || undefined;
+  const effectiveActualModel = matchedProvider?.default_model || undefined;
   const displayModelName =
     PROVIDER_TYPES.find((p) => p.value.toLowerCase() === effectiveProvider.toLowerCase())?.label ||
     matchedProvider?.name ||
@@ -177,7 +168,7 @@ export default function Generate() {
         mode,
         settings: getSettings(),
         model: effectiveProvider,
-        apiKey: "",
+        apiKey: currentApiKey,
         apiBaseUrl: effectiveApiBaseUrl,
         actualModel: effectiveActualModel,
         temperature: temperature[0],
@@ -270,9 +261,9 @@ export default function Generate() {
           </div>
 
           {!currentApiKey && (
-            <Card className="border-green-500/50 bg-green-500/10">
-              <CardContent className="p-3 text-sm text-green-700 dark:text-green-400">
-                ✨ 当前使用免费默认模型 Grok，如需使用自己的模型请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>配置
+            <Card className="border-amber-500/50 bg-amber-500/10">
+              <CardContent className="p-3 text-sm text-amber-700 dark:text-amber-400">
+                ⚠️ 尚未配置 API Key，生成将会失败。请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>添加提供商并配置 API Key
               </CardContent>
             </Card>
           )}
