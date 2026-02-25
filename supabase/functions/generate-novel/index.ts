@@ -500,16 +500,28 @@ serve(async (req) => {
     }
 
     // Create Supabase client with user's auth token
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey, {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseAnonKey =
+      Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return errorResponse(
+        500,
+        "SUPABASE_ENV_MISSING",
+        "服务端 Supabase 环境变量缺失（SUPABASE_URL / SUPABASE_ANON_KEY）"
+      );
+    }
+
+    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser();
+    } = await supabase.auth.getUser(accessToken);
     if (authError || !user) {
       return errorResponse(401, "AUTH_REQUIRED", "用户未登录");
     }
