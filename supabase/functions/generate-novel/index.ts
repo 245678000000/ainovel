@@ -21,6 +21,7 @@ const ALLOWED_MODES = new Set([
   "characters",
   "rewrite",
   "continue",
+  "test",
 ]);
 const MAX_UPSTREAM_RETRIES = 2;
 
@@ -542,8 +543,79 @@ serve(async (req) => {
       return errorResponse(
         400,
         "INVALID_MODE",
-        "无效的生成模式，支持 generate/outline/characters/rewrite/continue"
+        "无效的生成模式，支持 generate/outline/characters/rewrite/continue/test"
       );
+    }
+
+    // ── test 模式：后端代发检测请求，绕过浏览器 CORS 限制 ──
+    if (mode === "test") {
+      const testApiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      const testBaseUrl = typeof body.apiBaseUrl === "string" ? body.apiBaseUrl.trim() : "";
+      const testModel = typeof body.actualModel === "string" ? body.actualModel.trim() : "";
+      const testProviderType = typeof body.model === "string" ? body.model.trim() : "openai";
+
+      if (!testApiKey) {
+        return new Response(JSON.stringify({ ok: false, error: "请填写 API Key" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!testBaseUrl) {
+        return new Response(JSON.stringify({ ok: false, error: "请填写 API 地址" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      try {
+        let testRes: Response;
+        if (testProviderType === "claude") {
+          // Anthropic 协议
+          const url = buildClaudeEndpoint(testBaseUrl);
+          testRes = await fetch(url, {
+            method: "POST",
+            headers: {
+              "x-api-key": testApiKey,
+              "Content-Type": "application/json",
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model: testModel || "claude-3-haiku-20240307",
+              messages: [{ role: "user", content: "Hi" }],
+              max_tokens: 5,
+            }),
+          });
+        } else {
+          // OpenAI 兼容协议
+          const url = buildOpenAIEndpoint(testBaseUrl);
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (testApiKey) headers.Authorization = `Bearer ${testApiKey}`;
+          testRes = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              model: testModel || "gpt-4o-mini",
+              messages: [{ role: "user", content: "Hi" }],
+              max_tokens: 5,
+              stream: false,
+            }),
+          });
+        }
+
+        if (testRes.ok) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const errText = await testRes.text();
+        const errMsg = extractUpstreamErrorMessage(errText);
+        return new Response(JSON.stringify({ ok: false, error: `状态码 ${testRes.status}: ${errMsg}` }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "网络错误";
+        return new Response(JSON.stringify({ ok: false, error: msg }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     if (

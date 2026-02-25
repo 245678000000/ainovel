@@ -171,94 +171,54 @@ export default function SettingsPage() {
   const handleTest = async () => {
     setTesting(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast({ title: "❌ 检测失败", description: "请先登录", variant: "destructive" });
+        return;
+      }
+
       const providerType = form.provider_type;
       const defaultBaseUrl = selectedType?.defaultUrl || "";
       const baseUrl = form.api_base_url || defaultBaseUrl;
       const trimmedApiKey = form.api_key.trim();
 
-      if (providerType === "grok" && !trimmedApiKey) {
-        toast({
-          title: "ℹ️ 无法前端直连检测",
-          description: "Grok 未填写 API Key。实际生成时会尝试使用服务端 XAI_API_KEY/GROK_API_KEY。",
-        });
+      if (!trimmedApiKey) {
+        toast({ title: "❌ 检测失败", description: "请先填写 API Key", variant: "destructive" });
+        return;
+      }
+      if (!baseUrl) {
+        toast({ title: "❌ 检测失败", description: "请先填写 API 地址", variant: "destructive" });
         return;
       }
 
-      if (providerType === "claude") {
-        if (!trimmedApiKey) {
-          toast({
-            title: "❌ 连接失败",
-            description: "Claude 需要 API Key 才能检测连接",
-            variant: "destructive",
-          });
-          return;
-        }
-
-        const url = buildClaudeMessagesUrl(baseUrl || "https://api.anthropic.com/v1");
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": trimmedApiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: form.default_model || "claude-3-5-sonnet-20241022",
-            messages: [{ role: "user", content: "Hello" }],
-            max_tokens: 16,
-          }),
-        });
-
-        if (res.ok) {
-          toast({ title: "✅ 连接成功", description: "Claude API 服务可用" });
-        } else {
-          const message = await formatProviderError(res);
-          toast({
-            title: "❌ 连接失败",
-            description: message,
-            variant: "destructive",
-          });
-        }
-        return;
-      }
-
-      const url = buildOpenAICompletionsUrl(baseUrl);
-      if (!url) {
-        toast({
-          title: "❌ 连接失败",
-          description: "请先填写 API 地址",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (trimmedApiKey) headers.Authorization = `Bearer ${trimmedApiKey}`;
-
-      const res = await fetch(url, {
+      // 通过后端代发请求，绕过浏览器 CORS 限制
+      const edgeUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-novel`;
+      const res = await fetch(edgeUrl, {
         method: "POST",
-        headers,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
         body: JSON.stringify({
-          model: form.default_model || "gpt-4o-mini",
-          messages: [{ role: "user", content: "Hello" }],
-          max_tokens: 5,
-          stream: false,
+          mode: "test",
+          model: providerType,
+          apiKey: trimmedApiKey,
+          apiBaseUrl: trimTrailingSlashes(baseUrl),
+          actualModel: form.default_model || undefined,
+          settings: {},
         }),
       });
 
-      if (res.ok) {
-        toast({ title: "✅ 连接成功", description: "API 服务可用" });
+      const data = await res.json() as { ok: boolean; error?: string };
+      if (data.ok) {
+        toast({ title: "✅ 连接成功", description: "API Key 有效，服务可用" });
       } else {
-        const message = await formatProviderError(res);
-        toast({
-          title: "❌ 连接失败",
-          description: message,
-          variant: "destructive",
-        });
+        toast({ title: "❌ 连接失败", description: data.error || `状态码 ${res.status}`, variant: "destructive" });
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "未知错误";
-      toast({ title: "❌ 连接失败", description: message, variant: "destructive" });
+      toast({ title: "❌ 检测失败", description: message, variant: "destructive" });
     } finally {
       setTesting(false);
     }
