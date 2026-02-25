@@ -106,34 +106,39 @@ export default function NovelView() {
     };
   }, []);
 
-  const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
-  const modelLower = defaultModel.toLowerCase();
-  const nameMatchedProvider = providers.find(
-    (p) =>
-      p.enabled !== false &&
-      (p.provider_type.toLowerCase() === modelLower ||
-        p.name.toLowerCase() === modelLower ||
-        (p.default_model && p.default_model.toLowerCase().includes(modelLower)))
+  const enabledProviders = providers.filter((p) => p.enabled !== false);
+  const normalizedDefaultModel = defaultModel.toLowerCase();
+  const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
+
+  const typeMatchedWithKey = enabledProviders.find(
+    (p) => p.provider_type.toLowerCase() === normalizedDefaultModel && hasApiKey(p)
   );
-  const matchedProvider = defaultProvider || nameMatchedProvider;
-  const currentApiKey = matchedProvider?.api_key || "";
-  const activeModelType = matchedProvider?.provider_type || defaultModel;
-  const hasProviderKey = Boolean(currentApiKey);
-  const effectiveProvider = hasProviderKey ? activeModelType : "grok";
-  const effectiveApiBaseUrl =
-    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
-      ? undefined
-      : matchedProvider?.api_base_url || undefined;
-  const effectiveActualModel =
-    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
-      ? undefined
-      : matchedProvider?.default_model || undefined;
+  const defaultWithKey = enabledProviders.find((p) => p.is_default && hasApiKey(p));
+  const firstWithKey = enabledProviders.find((p) => hasApiKey(p));
+  const typeMatchedProvider = enabledProviders.find(
+    (p) => p.provider_type.toLowerCase() === normalizedDefaultModel
+  );
+  const defaultProvider = enabledProviders.find((p) => p.is_default);
+
+  const matchedProvider =
+    typeMatchedWithKey ||
+    defaultWithKey ||
+    firstWithKey ||
+    typeMatchedProvider ||
+    defaultProvider ||
+    enabledProviders[0];
+
+  const currentApiKey = matchedProvider?.api_key?.trim() || "";
+  const effectiveProvider = matchedProvider?.provider_type || defaultModel;
+  const effectiveApiBaseUrl = matchedProvider?.api_base_url || undefined;
+  const effectiveActualModel = matchedProvider?.default_model || undefined;
 
   const handleContinue = async () => {
     if (!novel || !session?.access_token) {
       toast({ title: "操作失败", description: "请先登录", variant: "destructive" });
       return;
     }
+
     setIsGenerating(true);
     setStreamContent("");
     stopRequestedRef.current = false;
@@ -147,7 +152,7 @@ export default function NovelView() {
         mode: "continue",
         settings: novel.settings_json || {},
         model: effectiveProvider,
-        apiKey: "",
+        apiKey: currentApiKey,
         apiBaseUrl: effectiveApiBaseUrl,
         actualModel: effectiveActualModel,
         novelId: novel.id,
@@ -160,9 +165,12 @@ export default function NovelView() {
         requestAbortControllerRef.current = null;
         setIsGenerating(false);
         if (stopRequestedRef.current) return;
+
         const nextNum = chapters.length + 1;
         const lines = fullContent.split("\n").filter((l) => l.trim());
-        const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || `第${nextNum}章`;
+        const chapterTitle =
+          lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") ||
+          `第${nextNum}章`;
         const chapterContent = lines.slice(1).join("\n").trim();
 
         const { data, error } = await supabase
@@ -184,17 +192,23 @@ export default function NovelView() {
           setChapters((prev) => [...prev, newChapter]);
           setSelectedChapter(newChapter);
           setStreamContent("");
-          // Update word count
+
           const nextWordCount = (novel.word_count || 0) + chapterContent.length;
           const { error: novelUpdateError } = await supabase
             .from("novels")
             .update({ word_count: nextWordCount })
             .eq("id", novel.id);
+
           if (novelUpdateError) {
-            toast({ title: "字数更新失败", description: novelUpdateError.message, variant: "destructive" });
+            toast({
+              title: "字数更新失败",
+              description: novelUpdateError.message,
+              variant: "destructive",
+            });
           } else {
             setNovel((prev) => (prev ? { ...prev, word_count: nextWordCount } : prev));
           }
+
           toast({ title: "章节已保存" });
         }
       },
@@ -211,6 +225,7 @@ export default function NovelView() {
 
   const handleRewrite = async () => {
     if (!selectedChapter || !novel || !session?.access_token) return;
+
     setIsGenerating(true);
     setStreamContent("");
     stopRequestedRef.current = false;
@@ -224,7 +239,7 @@ export default function NovelView() {
         mode: "rewrite",
         settings: novel.settings_json || {},
         model: effectiveProvider,
-        apiKey: "",
+        apiKey: currentApiKey,
         apiBaseUrl: effectiveApiBaseUrl,
         actualModel: effectiveActualModel,
         rewriteContent: selectedChapter.content,
@@ -237,13 +252,20 @@ export default function NovelView() {
         requestAbortControllerRef.current = null;
         setIsGenerating(false);
         if (stopRequestedRef.current) return;
+
         const lines = fullContent.split("\n").filter((l) => l.trim());
-        const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || selectedChapter.title;
+        const chapterTitle =
+          lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") ||
+          selectedChapter.title;
         const chapterContent = lines.slice(1).join("\n").trim();
 
         const { error } = await supabase
           .from("chapters")
-          .update({ title: chapterTitle, content: chapterContent, word_count: chapterContent.length })
+          .update({
+            title: chapterTitle,
+            content: chapterContent,
+            word_count: chapterContent.length,
+          })
           .eq("id", selectedChapter.id);
 
         if (error) {
@@ -254,10 +276,26 @@ export default function NovelView() {
 
           setChapters((prev) =>
             prev.map((ch) =>
-              ch.id === selectedChapter.id ? { ...ch, title: chapterTitle, content: chapterContent, word_count: chapterContent.length } : ch
+              ch.id === selectedChapter.id
+                ? {
+                    ...ch,
+                    title: chapterTitle,
+                    content: chapterContent,
+                    word_count: chapterContent.length,
+                  }
+                : ch
             )
           );
-          setSelectedChapter((prev) => prev ? { ...prev, title: chapterTitle, content: chapterContent, word_count: chapterContent.length } : prev);
+          setSelectedChapter((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  title: chapterTitle,
+                  content: chapterContent,
+                  word_count: chapterContent.length,
+                }
+              : prev
+          );
           setStreamContent("");
 
           if (wordDelta !== 0) {
@@ -266,8 +304,13 @@ export default function NovelView() {
               .from("novels")
               .update({ word_count: nextWordCount })
               .eq("id", novel.id);
+
             if (novelUpdateError) {
-              toast({ title: "字数更新失败", description: novelUpdateError.message, variant: "destructive" });
+              toast({
+                title: "字数更新失败",
+                description: novelUpdateError.message,
+                variant: "destructive",
+              });
             } else {
               setNovel((prev) => (prev ? { ...prev, word_count: nextWordCount } : prev));
             }

@@ -674,7 +674,8 @@ serve(async (req) => {
     );
     const resolvedApiKey = resolveApiKey(
       resolvedProvider,
-      apiKey ?? userProviderConfig?.api_key
+      // 优先使用数据库配置的 Key，其次前端传入的 Key（过滤空字符串）
+      userProviderConfig?.api_key || (typeof apiKey === "string" && apiKey.trim() ? apiKey : undefined)
     );
 
     if (!resolvedBaseUrl) {

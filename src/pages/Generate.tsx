@@ -130,14 +130,30 @@ export default function Generate() {
     harem,
   });
 
-  // 优先匹配 is_default 的提供商，其次按 provider_type 精确匹配
-  const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
-  const typeMatchedProvider = providers.find(
-    (p) => p.enabled !== false && p.provider_type.toLowerCase() === defaultModel.toLowerCase()
-  );
-  const firstEnabledProvider = providers.find((p) => p.enabled !== false);
-  const matchedProvider = defaultProvider || typeMatchedProvider || firstEnabledProvider;
-  const currentApiKey = matchedProvider?.api_key || "";
+    const enabledProviders = providers.filter((p) => p.enabled !== false);
+    const normalizedDefaultModel = defaultModel.toLowerCase();
+    const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
+
+    const typeMatchedWithKey = enabledProviders.find(
+      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel && hasApiKey(p)
+    );
+    const defaultWithKey = enabledProviders.find((p) => p.is_default && hasApiKey(p));
+    const firstWithKey = enabledProviders.find((p) => hasApiKey(p));
+    const typeMatchedProvider = enabledProviders.find(
+      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel
+    );
+    const defaultProvider = enabledProviders.find((p) => p.is_default);
+
+    const matchedProvider =
+      typeMatchedWithKey ||
+      defaultWithKey ||
+      firstWithKey ||
+      typeMatchedProvider ||
+      defaultProvider ||
+      enabledProviders[0];
+
+    const currentApiKey = matchedProvider?.api_key?.trim() || "";
+
   const activeModelType = matchedProvider?.provider_type || defaultModel;
   // 不再强制 fallback 到 grok，直接使用用户配置的提供商，让后端判断是否缺 Key
   const effectiveProvider = activeModelType;
@@ -260,13 +276,14 @@ export default function Generate() {
             </Badge>
           </div>
 
-          {!currentApiKey && (
-            <Card className="border-amber-500/50 bg-amber-500/10">
-              <CardContent className="p-3 text-sm text-amber-700 dark:text-amber-400">
-                ⚠️ 尚未配置 API Key，生成将会失败。请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>添加提供商并配置 API Key
-              </CardContent>
-            </Card>
-          )}
+            {!currentApiKey && (
+              <Card className="border-amber-500/50 bg-amber-500/10">
+                <CardContent className="p-3 text-sm text-amber-700 dark:text-amber-400">
+                  ⚠️ 当前选中的提供商没有可用 API Key，生成将会失败。请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>给默认提供商配置 API Key，或把已配置 Key 的提供商设为默认。
+                </CardContent>
+              </Card>
+            )}
+
 
           {/* Genre Multi-select */}
           <div className="space-y-2">
