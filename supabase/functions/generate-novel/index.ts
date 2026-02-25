@@ -22,6 +22,7 @@ const ALLOWED_MODES = new Set([
   "rewrite",
   "continue",
 ]);
+const MAX_UPSTREAM_RETRIES = 2;
 
 type ProviderProtocol = "openai-compatible" | "anthropic";
 type ProviderKey =
@@ -213,6 +214,44 @@ function errorResponse(
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractUpstreamErrorMessage(rawText: string): string {
+  if (!rawText) return "上游模型服务返回空错误信息";
+
+  try {
+    const parsed = JSON.parse(rawText) as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    if (typeof parsed.error === "string" && parsed.error.trim()) {
+      return parsed.error;
+    }
+    if (
+      parsed.error &&
+      typeof parsed.error === "object" &&
+      typeof parsed.error.message === "string" &&
+      parsed.error.message.trim()
+    ) {
+      return parsed.error.message;
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message;
+    }
+  } catch {
+    // fall through to heuristic parsing
+  }
+
+  const messageMatch = rawText.match(/message["'\s:：]+([^,"'}\]\n]+)/i);
+  if (messageMatch?.[1]) {
+    return messageMatch[1].trim();
+  }
+
+  return rawText.slice(0, 300);
+}
+
 function buildUserPrompt(settings: any, context?: any): string {
   const parts: string[] = [];
 
@@ -280,34 +319,56 @@ async function streamOpenAICompatible({
   userPrompt: string;
   temperature: number;
 }): Promise<Response> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
+  let lastError = "上游模型服务调用失败";
+
+  for (let attempt = 0; attempt <= MAX_UPSTREAM_RETRIES; attempt++) {
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          stream: true,
+          temperature,
+          max_tokens: 4096,
+        }),
+      });
+
+      if (response.ok) {
+        return response;
+      }
+
+      const errorText = await response.text();
+      const normalizedMessage = extractUpstreamErrorMessage(errorText);
+      lastError = `LLM API error [${response.status}]: ${normalizedMessage}`;
+
+      const retryable = response.status >= 500 && response.status < 600;
+      if (!retryable || attempt >= MAX_UPSTREAM_RETRIES) {
+        throw new Error(lastError);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "未知网络错误";
+      lastError = msg;
+      if (attempt >= MAX_UPSTREAM_RETRIES) {
+        throw new Error(lastError);
+      }
+    }
+
+    await sleep(400 * (attempt + 1));
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      stream: true,
-      temperature,
-      max_tokens: 16000,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM API error [${response.status}]: ${errorText}`);
-  }
-
-  return response;
+  throw new Error(lastError);
 }
 
 async function streamClaude({
@@ -325,26 +386,51 @@ async function streamClaude({
   userPrompt: string;
   temperature: number;
 }): Promise<Response> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-      stream: true,
-      temperature,
-      max_tokens: 16000,
-    }),
-  });
+  let response: Response | null = null;
+  let lastError = "Claude API 调用失败";
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Claude API error [${response.status}]: ${errorText}`);
+  for (let attempt = 0; attempt <= MAX_UPSTREAM_RETRIES; attempt++) {
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userPrompt }],
+          stream: true,
+          temperature,
+          max_tokens: 4096,
+        }),
+      });
+
+      if (response.ok) break;
+
+      const errorText = await response.text();
+      const normalizedMessage = extractUpstreamErrorMessage(errorText);
+      lastError = `Claude API error [${response.status}]: ${normalizedMessage}`;
+
+      const retryable = response.status >= 500 && response.status < 600;
+      if (!retryable || attempt >= MAX_UPSTREAM_RETRIES) {
+        throw new Error(lastError);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "未知网络错误";
+      lastError = msg;
+      if (attempt >= MAX_UPSTREAM_RETRIES) {
+        throw new Error(lastError);
+      }
+    }
+
+    await sleep(400 * (attempt + 1));
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(lastError);
   }
 
   // Transform Claude's SSE format to OpenAI-compatible format

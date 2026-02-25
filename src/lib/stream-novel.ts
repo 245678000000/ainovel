@@ -29,6 +29,22 @@ export async function streamNovelGeneration({
   signal?: AbortSignal;
 }) {
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-novel`;
+  const normalizeDisplayError = (raw: string, status?: number) => {
+    if (status === 401) return "登录已过期，请重新登录";
+    const text = raw || "";
+    if (
+      status === 500 ||
+      status === 502 ||
+      text.includes("LLM API error [500]") ||
+      text.includes("LLM API error [502]") ||
+      text.includes("Claude API error [500]") ||
+      text.includes("Claude API error [502]") ||
+      text.includes("internal_server_error")
+    ) {
+      return "模型服务暂时不稳定（上游返回 5xx），请稍后重试或切换模型。";
+    }
+    return raw;
+  };
 
   try {
     const resp = await fetch(url, {
@@ -54,10 +70,11 @@ export async function streamNovelGeneration({
         if (rawText) error = rawText.slice(0, 240);
       }
       if (resp.status === 401) {
-        onError("登录已过期，请重新登录");
+        onError(normalizeDisplayError("登录已过期，请重新登录", resp.status));
         return;
       }
-      onError(code ? `${error} [${code}]` : error);
+      const resolved = code ? `${error} [${code}]` : error;
+      onError(normalizeDisplayError(resolved, resp.status));
       return;
     }
 
@@ -130,6 +147,6 @@ export async function streamNovelGeneration({
     ) {
       return;
     }
-    onError(e instanceof Error ? e.message : "网络错误");
+    onError(normalizeDisplayError(e instanceof Error ? e.message : "网络错误"));
   }
 }
