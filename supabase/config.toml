@@ -1,4 +1,4 @@
 project_id = "wcdjngbpnywegpfadllw"
 
 [functions.generate-novel]
-verify_jwt = false
+verify_jwt = true

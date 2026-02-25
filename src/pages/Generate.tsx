@@ -55,6 +55,7 @@ export default function Generate() {
   const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null; api_base_url: string | null }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const abortRef = useRef(false);
+  const requestAbortControllerRef = useRef<AbortController | null>(null);
 
   const loadSettings = async () => {
     if (!user) return;
@@ -102,6 +103,13 @@ export default function Generate() {
     }
   }, [previewContent]);
 
+  useEffect(() => {
+    return () => {
+      requestAbortControllerRef.current?.abort();
+      requestAbortControllerRef.current = null;
+    };
+  }, []);
+
   const getSettings = () => ({
     genres,
     protagonist: {
@@ -134,10 +142,20 @@ export default function Generate() {
   const matchedProvider = defaultProvider || nameMatchedProvider;
   const currentApiKey = matchedProvider?.api_key || "";
   const activeModelType = matchedProvider?.provider_type || defaultModel;
+  const hasProviderKey = Boolean(currentApiKey);
+  const effectiveProvider = hasProviderKey ? activeModelType : "grok";
+  const effectiveApiBaseUrl =
+    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
+      ? undefined
+      : matchedProvider?.api_base_url || undefined;
+  const effectiveActualModel =
+    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
+      ? undefined
+      : matchedProvider?.default_model || undefined;
   const displayModelName =
-    PROVIDER_TYPES.find((p) => p.value.toLowerCase() === activeModelType.toLowerCase())?.label ||
+    PROVIDER_TYPES.find((p) => p.value.toLowerCase() === effectiveProvider.toLowerCase())?.label ||
     matchedProvider?.name ||
-    defaultModel;
+    effectiveProvider;
 
   const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
     if (!session?.access_token) {
@@ -149,16 +167,19 @@ export default function Generate() {
     setPreviewContent("");
     setGenerationMode(mode);
     abortRef.current = false;
+    requestAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortControllerRef.current = controller;
     let fullContent = "";
 
     await streamNovelGeneration({
       params: {
         mode,
         settings: getSettings(),
-        model: defaultModel,
-        apiKey: currentApiKey,
-        apiBaseUrl: matchedProvider?.api_base_url || undefined,
-        actualModel: matchedProvider?.default_model || undefined,
+        model: effectiveProvider,
+        apiKey: "",
+        apiBaseUrl: effectiveApiBaseUrl,
+        actualModel: effectiveActualModel,
         temperature: temperature[0],
         chapterNumber: 1,
       },
@@ -168,12 +189,18 @@ export default function Generate() {
         setPreviewContent(fullContent);
       },
       onDone: async () => {
+        requestAbortControllerRef.current = null;
         setIsGenerating(false);
         if (abortRef.current) return;
 
         // Auto-save based on mode
         if (mode === "generate" && user) {
           try {
+            const lines = fullContent.split("\n").filter((l) => l.trim());
+            const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || "第一章";
+            const chapterContent = lines.slice(1).join("\n").trim();
+            const initialWordCount = chapterContent.length || fullContent.trim().length;
+
             // Create novel
             const { data: novel, error: novelErr } = await supabase
               .from("novels")
@@ -182,25 +209,21 @@ export default function Generate() {
                 title: protagonistName ? `${protagonistName}的故事` : "未命名小说",
                 genre: genres,
                 settings_json: getSettings(),
-                word_count: fullContent.length,
+                word_count: initialWordCount,
               })
               .select()
               .single();
 
             if (novelErr) throw novelErr;
 
-            // Extract title from content (first line)
-            const lines = fullContent.split("\n").filter((l) => l.trim());
-            const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || "第一章";
-            const chapterContent = lines.slice(1).join("\n").trim();
-
-            await supabase.from("chapters").insert({
+            const { error: chapterErr } = await supabase.from("chapters").insert({
               novel_id: novel.id,
               chapter_number: 1,
               title: chapterTitle,
               content: chapterContent,
               word_count: chapterContent.length,
             });
+            if (chapterErr) throw chapterErr;
 
             toast({ title: "创作完成", description: "小说已自动保存到书库" });
           } catch (e: any) {
@@ -213,15 +236,20 @@ export default function Generate() {
         }
       },
       onError: (error) => {
+        requestAbortControllerRef.current = null;
+        if (abortRef.current) return;
         setIsGenerating(false);
         toast({ title: "生成失败", description: error, variant: "destructive" });
       },
       accessToken: session.access_token,
+      signal: controller.signal,
     });
   };
 
   const handleStop = () => {
     abortRef.current = true;
+    requestAbortControllerRef.current?.abort();
+    requestAbortControllerRef.current = null;
     setIsGenerating(false);
   };
 

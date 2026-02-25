@@ -15,48 +15,203 @@ const CHARACTER_SYSTEM_PROMPT = `You are a top Chinese web novelist. Generate de
 
 const REWRITE_SYSTEM_PROMPT = `You are a top Chinese web novelist with 15 years experience. Rewrite the given chapter in simplified Chinese, improving quality, pacing, and engagement. Keep the core plot points but enhance the writing. Every chapter must end with a hook. Never add author notes. Output ONLY the chapter title and pure text content.`;
 
-// LLM provider configurations
-interface LLMConfig {
-  url: string;
-  modelName: string;
-  headerBuilder: (apiKey: string) => Record<string, string>;
+const ALLOWED_MODES = new Set([
+  "generate",
+  "outline",
+  "characters",
+  "rewrite",
+  "continue",
+]);
+
+type ProviderProtocol = "openai-compatible" | "anthropic";
+type ProviderKey =
+  | "openai"
+  | "deepseek"
+  | "claude"
+  | "grok"
+  | "qwen"
+  | "siliconflow"
+  | "ollama"
+  | "custom";
+
+interface ProviderConfig {
+  protocol: ProviderProtocol;
+  defaultBaseUrl: string;
+  defaultModel: string;
 }
 
-const LLM_CONFIGS: Record<string, LLMConfig> = {
+interface UserProviderConfig {
+  provider_type: string;
+  api_key: string | null;
+  api_base_url: string | null;
+  default_model: string | null;
+  is_default: boolean | null;
+}
+
+const PROVIDER_CONFIGS: Record<ProviderKey, ProviderConfig> = {
+  openai: {
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-4o-mini",
+  },
   deepseek: {
-    url: "https://api.deepseek.com/v1/chat/completions",
-    modelName: "deepseek-chat",
-    headerBuilder: (key) => ({
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    }),
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-chat",
   },
   claude: {
-    url: "https://api.anthropic.com/v1/messages",
-    modelName: "claude-3-5-sonnet-20241022",
-    headerBuilder: (key) => ({
-      "x-api-key": key,
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    }),
+    protocol: "anthropic",
+    defaultBaseUrl: "https://api.anthropic.com/v1",
+    defaultModel: "claude-3-5-sonnet-20241022",
   },
   grok: {
-    url: "https://api.x.ai/v1/chat/completions",
-    modelName: "grok-3",
-    headerBuilder: (key) => ({
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    }),
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.x.ai/v1",
+    defaultModel: "grok-3",
   },
   qwen: {
-    url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    modelName: "qwen-plus",
-    headerBuilder: (key) => ({
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    }),
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen-plus",
+  },
+  siliconflow: {
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.siliconflow.cn/v1",
+    defaultModel: "deepseek-ai/DeepSeek-V3",
+  },
+  ollama: {
+    protocol: "openai-compatible",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultModel: "llama3",
+  },
+  custom: {
+    protocol: "openai-compatible",
+    defaultBaseUrl: "",
+    defaultModel: "gpt-4o-mini",
   },
 };
+
+const PROVIDER_KEYS = new Set<ProviderKey>(
+  Object.keys(PROVIDER_CONFIGS) as ProviderKey[]
+);
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+
+function buildOpenAIEndpoint(baseUrl: string): string {
+  const normalized = normalizeBaseUrl(baseUrl);
+  if (!normalized) return "";
+  return normalized.endsWith("/chat/completions")
+    ? normalized
+    : `${normalized}/chat/completions`;
+}
+
+function buildClaudeEndpoint(baseUrl: string): string {
+  const normalized = normalizeBaseUrl(baseUrl);
+  if (!normalized) return "";
+  return normalized.endsWith("/messages")
+    ? normalized
+    : `${normalized}/messages`;
+}
+
+function inferProviderFromModel(modelName: string): ProviderKey {
+  const value = modelName.toLowerCase();
+
+  if (value.includes("claude")) return "claude";
+  if (value.includes("grok")) return "grok";
+  if (value.includes("deepseek")) return "deepseek";
+  if (value.includes("qwen")) return "qwen";
+  if (value.includes("silicon")) return "siliconflow";
+  if (value.includes("ollama") || value.includes("llama")) return "ollama";
+  if (value.includes("gpt") || value.includes("openai")) return "openai";
+
+  return "custom";
+}
+
+function resolveProvider(model: unknown): ProviderKey {
+  if (typeof model !== "string") return "custom";
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return "custom";
+  if (PROVIDER_KEYS.has(normalized as ProviderKey)) {
+    return normalized as ProviderKey;
+  }
+  return inferProviderFromModel(normalized);
+}
+
+function resolveModel(
+  actualModel: unknown,
+  model: unknown,
+  provider: ProviderKey
+): string {
+  if (typeof actualModel === "string" && actualModel.trim()) {
+    return actualModel.trim();
+  }
+
+  if (typeof model === "string") {
+    const candidate = model.trim();
+    if (candidate && !PROVIDER_KEYS.has(candidate.toLowerCase() as ProviderKey)) {
+      return candidate;
+    }
+  }
+
+  return PROVIDER_CONFIGS[provider].defaultModel;
+}
+
+function resolveBaseUrl(apiBaseUrl: unknown, provider: ProviderKey): string {
+  if (typeof apiBaseUrl === "string" && apiBaseUrl.trim()) {
+    return normalizeBaseUrl(apiBaseUrl);
+  }
+  return normalizeBaseUrl(PROVIDER_CONFIGS[provider].defaultBaseUrl);
+}
+
+function resolveApiKey(provider: ProviderKey, userApiKey: unknown): string {
+  if (typeof userApiKey === "string" && userApiKey.trim()) {
+    return userApiKey.trim();
+  }
+
+  if (provider === "grok") {
+    return Deno.env.get("XAI_API_KEY") || Deno.env.get("GROK_API_KEY") || "";
+  }
+
+  if (provider === "claude") {
+    return (
+      Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("CLAUDE_API_KEY") || ""
+    );
+  }
+
+  return "";
+}
+
+async function getUserProviderConfig(
+  supabase: any,
+  userId: string,
+  provider: ProviderKey
+): Promise<UserProviderConfig | null> {
+  const { data, error } = await supabase
+    .from("model_providers")
+    .select("provider_type, api_key, api_base_url, default_model, is_default")
+    .eq("user_id", userId)
+    .eq("provider_type", provider)
+    .eq("enabled", true)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return null;
+  return data[0] as unknown as UserProviderConfig;
+}
+
+function errorResponse(
+  status: number,
+  code: string,
+  message: string
+): Response {
+  return new Response(JSON.stringify({ error: message, code }), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
 function buildUserPrompt(settings: any, context?: any): string {
   const parts: string[] = [];
@@ -110,18 +265,33 @@ function buildPreviousSummary(chapters: any[]): string {
     .join("\n\n");
 }
 
-async function streamOpenAICompatible(
-  config: LLMConfig,
-  apiKey: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number
-): Promise<Response> {
-  const response = await fetch(config.url, {
+async function streamOpenAICompatible({
+  url,
+  apiKey,
+  model,
+  systemPrompt,
+  userPrompt,
+  temperature,
+}: {
+  url: string;
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  temperature: number;
+}): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const response = await fetch(url, {
     method: "POST",
-    headers: config.headerBuilder(apiKey),
+    headers,
     body: JSON.stringify({
-      model: config.modelName,
+      model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -140,17 +310,30 @@ async function streamOpenAICompatible(
   return response;
 }
 
-async function streamClaude(
-  apiKey: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number
-): Promise<Response> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+async function streamClaude({
+  url,
+  apiKey,
+  model,
+  systemPrompt,
+  userPrompt,
+  temperature,
+}: {
+  url: string;
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  temperature: number;
+}): Promise<Response> {
+  const response = await fetch(url, {
     method: "POST",
-    headers: LLM_CONFIGS.claude.headerBuilder(apiKey),
+    headers: {
+      "x-api-key": apiKey,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
     body: JSON.stringify({
-      model: LLM_CONFIGS.claude.modelName,
+      model,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
       stream: true,
@@ -220,13 +403,14 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return errorResponse(405, "METHOD_NOT_ALLOWED", "仅支持 POST 请求");
+  }
+
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "未授权" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return errorResponse(401, "AUTH_HEADER_INVALID", "未授权");
     }
 
     // Create Supabase client with user's auth token
@@ -238,45 +422,130 @@ serve(async (req) => {
 
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser();
-    if (!user) {
-      return new Response(JSON.stringify({ error: "用户未登录" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (authError || !user) {
+      return errorResponse(401, "AUTH_REQUIRED", "用户未登录");
     }
 
-    const body = await req.json();
-    const {
-      mode, // "generate" | "outline" | "characters" | "rewrite" | "continue"
-      settings,
-      model,
-      apiKey,
-      temperature = 0.7,
-      novelId,
-      chapterNumber,
-      rewriteContent,
-    } = body;
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await req.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return errorResponse(400, "INVALID_PAYLOAD", "请求体必须为对象");
+      }
+      body = parsed as Record<string, unknown>;
+    } catch {
+      return errorResponse(400, "INVALID_JSON", "请求体必须为有效 JSON");
+    }
 
-    if (!apiKey) {
-      return new Response(
-        JSON.stringify({ error: "请先在设置页面配置API密钥" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+    const mode = typeof body.mode === "string" ? body.mode : "";
+    if (!ALLOWED_MODES.has(mode)) {
+      return errorResponse(
+        400,
+        "INVALID_MODE",
+        "无效的生成模式，支持 generate/outline/characters/rewrite/continue"
       );
     }
 
-    const llmModel = model || "deepseek";
-    const config = LLM_CONFIGS[llmModel];
-    if (!config) {
-      return new Response(
-        JSON.stringify({ error: `不支持的模型: ${llmModel}` }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+    if (
+      !body.settings ||
+      typeof body.settings !== "object" ||
+      Array.isArray(body.settings)
+    ) {
+      return errorResponse(400, "INVALID_SETTINGS", "缺少有效的 settings");
+    }
+
+    const settings = body.settings as Record<string, unknown>;
+    const model = body.model;
+    const apiKey = body.apiKey;
+    const apiBaseUrl = body.apiBaseUrl;
+    const actualModel = body.actualModel;
+    const novelId =
+      typeof body.novelId === "string" && body.novelId.trim()
+        ? body.novelId.trim()
+        : undefined;
+    const chapterNumber =
+      typeof body.chapterNumber === "number" ? body.chapterNumber : undefined;
+    const rewriteContent =
+      typeof body.rewriteContent === "string" ? body.rewriteContent : undefined;
+    const temperature =
+      typeof body.temperature === "number"
+        ? Math.max(0, Math.min(2, body.temperature))
+        : 0.7;
+
+    if (mode === "continue" && !novelId) {
+      return errorResponse(400, "NOVEL_ID_REQUIRED", "继续写作需要 novelId");
+    }
+
+    if (mode === "rewrite" && !rewriteContent?.trim()) {
+      return errorResponse(
+        400,
+        "REWRITE_CONTENT_REQUIRED",
+        "重写模式需要 rewriteContent"
+      );
+    }
+
+    const resolvedProvider = resolveProvider(model);
+    const providerConfig = PROVIDER_CONFIGS[resolvedProvider];
+    const userProviderConfig = await getUserProviderConfig(
+      supabase,
+      user.id,
+      resolvedProvider
+    );
+    const resolvedBaseUrl = resolveBaseUrl(
+      apiBaseUrl ?? userProviderConfig?.api_base_url,
+      resolvedProvider
+    );
+    const resolvedModel = resolveModel(
+      actualModel ?? userProviderConfig?.default_model,
+      model,
+      resolvedProvider
+    );
+    const resolvedApiKey = resolveApiKey(
+      resolvedProvider,
+      apiKey ?? userProviderConfig?.api_key
+    );
+
+    if (!resolvedBaseUrl) {
+      return errorResponse(
+        400,
+        "API_BASE_URL_REQUIRED",
+        "请先配置有效的 API Base URL"
+      );
+    }
+
+    if (!resolvedModel) {
+      return errorResponse(400, "MODEL_REQUIRED", "请先配置可用的模型名称");
+    }
+
+    if (resolvedProvider === "grok" && !resolvedApiKey) {
+      return errorResponse(
+        400,
+        "API_KEY_REQUIRED_GROK",
+        "Grok 未配置可用 API Key。请在设置中填写 API Key，或在服务端配置 XAI_API_KEY/GROK_API_KEY。"
+      );
+    }
+
+    if (providerConfig.protocol === "anthropic" && !resolvedApiKey) {
+      return errorResponse(
+        400,
+        "API_KEY_REQUIRED_CLAUDE",
+        "Claude 需要 API Key。请在设置中填写 API Key，或在服务端配置 ANTHROPIC_API_KEY/CLAUDE_API_KEY。"
+      );
+    }
+
+    if (
+      (resolvedProvider === "openai" ||
+        resolvedProvider === "deepseek" ||
+        resolvedProvider === "qwen" ||
+        resolvedProvider === "siliconflow") &&
+      !resolvedApiKey
+    ) {
+      return errorResponse(
+        400,
+        "API_KEY_REQUIRED_PROVIDER",
+        `${resolvedProvider} 需要 API Key。请在设置中配置该提供商的 API Key。`
       );
     }
 
@@ -326,16 +595,24 @@ serve(async (req) => {
 
     // Call the appropriate LLM
     let llmResponse: Response;
-    if (llmModel === "claude") {
-      llmResponse = await streamClaude(apiKey, systemPrompt, userPrompt, temperature);
-    } else {
-      llmResponse = await streamOpenAICompatible(
-        config,
-        apiKey,
+    if (providerConfig.protocol === "anthropic") {
+      llmResponse = await streamClaude({
+        url: buildClaudeEndpoint(resolvedBaseUrl),
+        apiKey: resolvedApiKey,
+        model: resolvedModel,
         systemPrompt,
         userPrompt,
-        temperature
-      );
+        temperature,
+      });
+    } else {
+      llmResponse = await streamOpenAICompatible({
+        url: buildOpenAIEndpoint(resolvedBaseUrl),
+        apiKey: resolvedApiKey,
+        model: resolvedModel,
+        systemPrompt,
+        userPrompt,
+        temperature,
+      });
     }
 
     return new Response(llmResponse.body, {
@@ -349,9 +626,11 @@ serve(async (req) => {
   } catch (e) {
     console.error("generate-novel error:", e);
     const message = e instanceof Error ? e.message : "未知错误";
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const isUpstreamError = /API error \[\d+\]/.test(message);
+    return errorResponse(
+      isUpstreamError ? 502 : 500,
+      isUpstreamError ? "LLM_UPSTREAM_ERROR" : "INTERNAL_ERROR",
+      message
+    );
   }
 });

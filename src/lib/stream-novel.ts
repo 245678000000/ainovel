@@ -19,12 +19,14 @@ export async function streamNovelGeneration({
   onDone,
   onError,
   accessToken,
+  signal,
 }: {
   params: StreamNovelParams;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
   accessToken: string;
+  signal?: AbortSignal;
 }) {
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-novel`;
 
@@ -37,11 +39,25 @@ export async function streamNovelGeneration({
         apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       },
       body: JSON.stringify(params),
+      signal,
     });
 
     if (!resp.ok) {
-      const errData = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-      onError(errData.error || `请求失败: ${resp.status}`);
+      const rawText = await resp.text();
+      let error = `请求失败: ${resp.status}`;
+      let code = "";
+      try {
+        const parsed = JSON.parse(rawText) as { error?: string; code?: string };
+        if (parsed.error) error = parsed.error;
+        if (parsed.code) code = parsed.code;
+      } catch {
+        if (rawText) error = rawText.slice(0, 240);
+      }
+      if (resp.status === 401) {
+        onError("登录已过期，请重新登录");
+        return;
+      }
+      onError(code ? `${error} [${code}]` : error);
       return;
     }
 
@@ -107,7 +123,13 @@ export async function streamNovelGeneration({
     }
 
     onDone();
-  } catch (e) {
+  } catch (e: unknown) {
+    if (
+      (e instanceof DOMException && e.name === "AbortError") ||
+      (typeof e === "object" && e !== null && "name" in e && e.name === "AbortError")
+    ) {
+      return;
+    }
     onError(e instanceof Error ? e.message : "网络错误");
   }
 }

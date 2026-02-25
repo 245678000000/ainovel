@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { streamNovelGeneration } from "@/lib/stream-novel";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ArrowLeft, PenTool, RotateCcw, ChevronRight, Maximize2, Minimize2, Loader2 } from "lucide-react";
+import { ArrowLeft, PenTool, RotateCcw, ChevronRight, Maximize2, Minimize2, Loader2, StopCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
 
@@ -41,6 +41,8 @@ export default function NovelView() {
   const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null; api_base_url: string | null }[]>([]);
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const streamRef = useRef<HTMLDivElement>(null);
+  const requestAbortControllerRef = useRef<AbortController | null>(null);
+  const stopRequestedRef = useRef(false);
 
   const loadProviders = async () => {
     if (!user) return;
@@ -69,6 +71,7 @@ export default function NovelView() {
       ]);
       if (novelRes.error) {
         toast({ title: "加载失败", description: novelRes.error.message, variant: "destructive" });
+        setLoading(false);
         return;
       }
       setNovel(novelRes.data as Novel);
@@ -95,6 +98,14 @@ export default function NovelView() {
     if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
   }, [streamContent]);
 
+  useEffect(() => {
+    return () => {
+      requestAbortControllerRef.current?.abort();
+      requestAbortControllerRef.current = null;
+      stopRequestedRef.current = true;
+    };
+  }, []);
+
   const defaultProvider = providers.find((p) => p.is_default && p.enabled !== false);
   const modelLower = defaultModel.toLowerCase();
   const nameMatchedProvider = providers.find(
@@ -106,6 +117,17 @@ export default function NovelView() {
   );
   const matchedProvider = defaultProvider || nameMatchedProvider;
   const currentApiKey = matchedProvider?.api_key || "";
+  const activeModelType = matchedProvider?.provider_type || defaultModel;
+  const hasProviderKey = Boolean(currentApiKey);
+  const effectiveProvider = hasProviderKey ? activeModelType : "grok";
+  const effectiveApiBaseUrl =
+    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
+      ? undefined
+      : matchedProvider?.api_base_url || undefined;
+  const effectiveActualModel =
+    !hasProviderKey && activeModelType.toLowerCase() !== "grok"
+      ? undefined
+      : matchedProvider?.default_model || undefined;
 
   const handleContinue = async () => {
     if (!novel || !session?.access_token) {
@@ -114,16 +136,20 @@ export default function NovelView() {
     }
     setIsGenerating(true);
     setStreamContent("");
+    stopRequestedRef.current = false;
+    requestAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortControllerRef.current = controller;
     let fullContent = "";
 
     await streamNovelGeneration({
       params: {
         mode: "continue",
         settings: novel.settings_json || {},
-        model: defaultModel,
-        apiKey: currentApiKey,
-        apiBaseUrl: matchedProvider?.api_base_url || undefined,
-        actualModel: matchedProvider?.default_model || undefined,
+        model: effectiveProvider,
+        apiKey: "",
+        apiBaseUrl: effectiveApiBaseUrl,
+        actualModel: effectiveActualModel,
         novelId: novel.id,
       },
       onDelta: (text) => {
@@ -131,7 +157,9 @@ export default function NovelView() {
         setStreamContent(fullContent);
       },
       onDone: async () => {
+        requestAbortControllerRef.current = null;
         setIsGenerating(false);
+        if (stopRequestedRef.current) return;
         const nextNum = chapters.length + 1;
         const lines = fullContent.split("\n").filter((l) => l.trim());
         const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || `第${nextNum}章`;
@@ -157,15 +185,27 @@ export default function NovelView() {
           setSelectedChapter(newChapter);
           setStreamContent("");
           // Update word count
-          await supabase.from("novels").update({ word_count: (novel.word_count || 0) + chapterContent.length }).eq("id", novel.id);
+          const nextWordCount = (novel.word_count || 0) + chapterContent.length;
+          const { error: novelUpdateError } = await supabase
+            .from("novels")
+            .update({ word_count: nextWordCount })
+            .eq("id", novel.id);
+          if (novelUpdateError) {
+            toast({ title: "字数更新失败", description: novelUpdateError.message, variant: "destructive" });
+          } else {
+            setNovel((prev) => (prev ? { ...prev, word_count: nextWordCount } : prev));
+          }
           toast({ title: "章节已保存" });
         }
       },
       onError: (error) => {
+        requestAbortControllerRef.current = null;
+        if (stopRequestedRef.current) return;
         setIsGenerating(false);
         toast({ title: "生成失败", description: error, variant: "destructive" });
       },
       accessToken: session.access_token,
+      signal: controller.signal,
     });
   };
 
@@ -173,16 +213,20 @@ export default function NovelView() {
     if (!selectedChapter || !novel || !session?.access_token) return;
     setIsGenerating(true);
     setStreamContent("");
+    stopRequestedRef.current = false;
+    requestAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortControllerRef.current = controller;
     let fullContent = "";
 
     await streamNovelGeneration({
       params: {
         mode: "rewrite",
         settings: novel.settings_json || {},
-        model: defaultModel,
-        apiKey: currentApiKey,
-        apiBaseUrl: matchedProvider?.api_base_url || undefined,
-        actualModel: matchedProvider?.default_model || undefined,
+        model: effectiveProvider,
+        apiKey: "",
+        apiBaseUrl: effectiveApiBaseUrl,
+        actualModel: effectiveActualModel,
         rewriteContent: selectedChapter.content,
       },
       onDelta: (text) => {
@@ -190,7 +234,9 @@ export default function NovelView() {
         setStreamContent(fullContent);
       },
       onDone: async () => {
+        requestAbortControllerRef.current = null;
         setIsGenerating(false);
+        if (stopRequestedRef.current) return;
         const lines = fullContent.split("\n").filter((l) => l.trim());
         const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || selectedChapter.title;
         const chapterContent = lines.slice(1).join("\n").trim();
@@ -203,6 +249,9 @@ export default function NovelView() {
         if (error) {
           toast({ title: "保存失败", description: error.message, variant: "destructive" });
         } else {
+          const previousWords = selectedChapter.word_count || selectedChapter.content.length;
+          const wordDelta = chapterContent.length - previousWords;
+
           setChapters((prev) =>
             prev.map((ch) =>
               ch.id === selectedChapter.id ? { ...ch, title: chapterTitle, content: chapterContent, word_count: chapterContent.length } : ch
@@ -210,15 +259,39 @@ export default function NovelView() {
           );
           setSelectedChapter((prev) => prev ? { ...prev, title: chapterTitle, content: chapterContent, word_count: chapterContent.length } : prev);
           setStreamContent("");
+
+          if (wordDelta !== 0) {
+            const nextWordCount = Math.max(0, (novel.word_count || 0) + wordDelta);
+            const { error: novelUpdateError } = await supabase
+              .from("novels")
+              .update({ word_count: nextWordCount })
+              .eq("id", novel.id);
+            if (novelUpdateError) {
+              toast({ title: "字数更新失败", description: novelUpdateError.message, variant: "destructive" });
+            } else {
+              setNovel((prev) => (prev ? { ...prev, word_count: nextWordCount } : prev));
+            }
+          }
+
           toast({ title: "重写完成并已保存" });
         }
       },
       onError: (error) => {
+        requestAbortControllerRef.current = null;
+        if (stopRequestedRef.current) return;
         setIsGenerating(false);
         toast({ title: "重写失败", description: error, variant: "destructive" });
       },
       accessToken: session.access_token,
+      signal: controller.signal,
     });
+  };
+
+  const handleStop = () => {
+    stopRequestedRef.current = true;
+    requestAbortControllerRef.current?.abort();
+    requestAbortControllerRef.current = null;
+    setIsGenerating(false);
   };
 
   if (loading) {
@@ -331,6 +404,12 @@ export default function NovelView() {
         </div>
         {/* Action bar */}
         <div className="flex items-center justify-center gap-3 border-t border-border/50 px-4 py-3">
+          {isGenerating && (
+            <Button variant="destructive" onClick={handleStop}>
+              <StopCircle className="mr-2 h-4 w-4" />
+              停止生成
+            </Button>
+          )}
           <Button variant="secondary" disabled={isGenerating} onClick={handleContinue}>
             {isGenerating && !streamContent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenTool className="mr-2 h-4 w-4" />}
             继续写作
