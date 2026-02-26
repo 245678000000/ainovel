@@ -1,73 +1,88 @@
-# Welcome to your Lovable project
+# 小说创作设定助手（Novel Creator Form） ✨  
+一个美观、强大、**完全本地运行**的小说创作设定表单工具，帮你在写作前一次性梳理主角、配角、反派、世界观和情节大纲，一键生成可直接喂给 Cursor / Claude / GPT 的高质量 System Prompt。  
 
-## Project info
+---
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## ✨ 核心功能
 
-## How can I edit this code?
+- **小说类型多选**：内置 28 种主流网文类型，支持自由多选组合  
+- **主角详细设定**：姓名、性别、年龄、性格等关键信息一站式配置  
+- **动态配角 & 反派卡片**：  
+  - 「+ 添加配角」与「+ 添加反派」无限添加  
+  - 卡片式布局，支持上移 / 下移排序  
+  - 关系、性格标签、身份背景、能力/弱点、人物弧光一应俱全  
+- **折叠式世界观细节补充**：力量/魔法/科技体系、势力结构、重大历史、重要地点、文化禁忌等集中管理  
+- **分段式情节大纲**：开头（前 30%）、中段高潮关键节点（3–5 个）、结局类型（HE / BE / 开放 / 大团圆 / 虐 / 爽 / 开放式）、多条副线  
+- **写作风格要求**：叙述视角、整体语气、金手指程度、重点描写内容、每章建议字数  
+- **禁忌与额外要求**：支持多条输入，清晰告诉 AI 不要踩的雷  
+- **参考作品借鉴**：为每部作品记录「作品名 + 具体借鉴点」  
+- **一键生成 System Prompt**：  
+  - 自动把全表单内容拼成结构化、分章节的「小说写作 System Prompt」  
+  - 一键复制到剪贴板，直接粘贴进 AI 聊天框即可开写  
+- **localStorage 自动保存**：所有输入实时保存，刷新 / 误关页面也不丢  
+- **一键导出 / 导入 JSON**：轻松在不同设备、不同浏览器之间迁移设定  
+- **浅色 / 深色模式**：适配系统主题，紫色为主的极简高级配色  
+- **完全响应式**：在手机、平板、桌面浏览器上都有优秀的编辑体验  
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## 🚀 快速开始
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+1. **下载项目**
+   - 从 GitHub 下载或克隆本仓库  
+   - 核心文件：`novel-creator.html`（单文件应用）
 
-Changes made via Lovable will be committed automatically to this repo.
+2. **打开方式**
+   - 在本地双击 `novel-creator.html`，或拖到浏览器中打开  
+   - 无需安装 Node / npm / 任何依赖
 
-**Use your preferred IDE**
+3. **使用步骤**
+   1. 填写「创作设定」表单（主角、配角、反派、世界观、情节等）  
+   2. 点击右上角「生成小说提示词」按钮，将 System Prompt 复制到剪贴板  
+   3. 打开 Cursor / Claude / GPT，把 Prompt 粘贴进去，让 AI 按你的设定开写  
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+---
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## 📸 功能截图
 
-Follow these steps:
+- 表单首页与主题切换示意：  
+  ![首页与主题](screenshot-1.png)  
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+- 配角 / 反派卡片与拖拽排序：  
+  ![角色设定](screenshot-2.png)  
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+- 世界观细节与情节大纲编辑界面：  
+  ![世界观与大纲](screenshot-3.png)  
 
-# Step 3: Install the necessary dependencies.
-npm i
+---
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## 🎯 适用人群
 
-**Edit a file directly in GitHub**
+- 想系统化整理设定的**网络小说作者**  
+- 想用 AI 写长篇、希望控制细节与走向的**创作者**  
+- 对世界观、人物关系、剧情结构有强迫症的**设定控 / 世界观党**  
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## 🧭 未来计划
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+- 支持将当前设定保存为「模板库」，一键复用常用世界观  
+- 集成简单的「AI 一键补完设定」功能，自动给出配角 / 反派草案  
+- 导出为 Markdown / TXT / Word 等多种格式，方便提交给编辑或自行备份  
+- 增加多语言界面（中英切换），方便海外作者使用  
+- 提供多套配色主题（仙侠、科幻、都市等风格化主题皮肤）  
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+## 📄 许可证
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+本项目采用 **MIT License** 开源协议，欢迎自由使用、修改和二次创作。  
 
-## How can I deploy this project?
+---
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## 🙏 致谢
 
-## Can I connect a custom domain to my Lovable project?
+- 感谢 **Tailwind CSS** 提供优雅高效的原子化样式方案  
+- 感谢 **Cursor / Claude / OpenAI GPT** 等 AI 工具带来的全新写作体验  
+- 感谢所有尝试、反馈和改进本项目的创作者们 ❤️
 
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
