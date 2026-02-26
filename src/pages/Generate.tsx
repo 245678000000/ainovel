@@ -4,24 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { streamNovelGeneration } from "@/lib/stream-novel";
 import { PROVIDER_TYPES } from "@/lib/provider-types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { PenTool, BookOpen, Users, Loader2, Sparkles, StopCircle } from "lucide-react";
+import { BookOpen, Loader2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
-
-const allGenres = ["玄幻", "仙侠", "都市", "言情", "科幻", "系统文", "后宫", "无限流", "悬疑", "历史", "军事", "游戏"];
-const allStyles = ["爽文", "虐文", "细腻", "幽默", "热血", "暗黑", "轻松", "文艺"];
-const narrations = ["第三人称", "第一人称"];
+import { NovelSettingsForm, GenerateMode } from "@/components/novel-settings/NovelSettingsForm";
+import { NovelSettings } from "@/components/novel-settings/types";
 
 export default function Generate() {
   const [searchParams] = useSearchParams();
@@ -30,25 +18,6 @@ export default function Generate() {
   const { toast } = useToast();
   const previewRef = useRef<HTMLDivElement>(null);
 
-  const [genres, setGenres] = useState<string[]>(
-    searchParams.get("genre") ? [searchParams.get("genre")!] : []
-  );
-  const [protagonistName, setProtagonistName] = useState(searchParams.get("protagonist") || "");
-  const [protagonistGender, setProtagonistGender] = useState("男");
-  const [protagonistAge, setProtagonistAge] = useState("");
-  const [protagonistPersonality, setProtagonistPersonality] = useState("");
-  const [worldSetting, setWorldSetting] = useState("");
-  const [conflict, setConflict] = useState("");
-  const [totalWords, setTotalWords] = useState("100000");
-  const [chapterWords, setChapterWords] = useState("3000");
-  const [style, setStyle] = useState(searchParams.get("style") || "");
-  const [narration, setNarration] = useState("第三人称");
-  const [nsfw, setNsfw] = useState(false);
-  const [systemNovel, setSystemNovel] = useState(false);
-  const [harem, setHarem] = useState(false);
-  const [temperature, setTemperature] = useState([0.7]);
-  const [synopsis, setSynopsis] = useState(searchParams.get("synopsis") || "");
-
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
   const [generationMode, setGenerationMode] = useState("");
@@ -56,6 +25,7 @@ export default function Generate() {
   const [defaultModel, setDefaultModel] = useState("deepseek");
   const abortRef = useRef(false);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
+  const [latestSettings, setLatestSettings] = useState<NovelSettings | null>(null);
 
   const loadSettings = async () => {
     if (!user) return;
@@ -74,7 +44,6 @@ export default function Generate() {
         model = (def || first)?.provider_type || null;
       }
       setDefaultModel(model || "deepseek");
-      setNsfw(profile.nsfw_enabled || false);
     }
   };
 
@@ -110,26 +79,6 @@ export default function Generate() {
     };
   }, []);
 
-  const getSettings = () => ({
-    genres,
-    protagonist: {
-      name: protagonistName,
-      gender: protagonistGender,
-      age: protagonistAge,
-      personality: protagonistPersonality,
-    },
-    worldSetting,
-    conflict,
-    synopsis,
-    totalWords,
-    chapterWords,
-    style,
-    narration,
-    nsfw,
-    systemNovel,
-    harem,
-  });
-
     const enabledProviders = providers.filter((p) => p.enabled !== false);
     const normalizedDefaultModel = defaultModel.toLowerCase();
     const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
@@ -164,12 +113,12 @@ export default function Generate() {
     matchedProvider?.name ||
     effectiveProvider;
 
-  const handleGenerate = async (mode: "generate" | "outline" | "characters") => {
+  const handleGenerate = async (mode: GenerateMode, settings: NovelSettings) => {
     if (!session?.access_token) {
       toast({ title: "未登录", description: "请先登录", variant: "destructive" });
       return;
     }
-
+    setLatestSettings(settings);
     setIsGenerating(true);
     setPreviewContent("");
     setGenerationMode(mode);
@@ -182,12 +131,12 @@ export default function Generate() {
     await streamNovelGeneration({
       params: {
         mode,
-        settings: getSettings(),
+        settings,
         model: effectiveProvider,
         apiKey: currentApiKey,
         apiBaseUrl: effectiveApiBaseUrl,
         actualModel: effectiveActualModel,
-        temperature: temperature[0],
+        temperature: settings.writingStyle.temperature,
         chapterNumber: 1,
       },
       onDelta: (text) => {
@@ -213,9 +162,11 @@ export default function Generate() {
               .from("novels")
               .insert({
                 user_id: user.id,
-                title: protagonistName ? `${protagonistName}的故事` : "未命名小说",
-                genre: genres,
-                settings_json: getSettings(),
+                title: settings.mainCharacter.name
+                  ? `${settings.mainCharacter.name}的故事`
+                  : "未命名小说",
+                genre: settings.genres,
+                settings_json: settings,
                 word_count: initialWordCount,
               })
               .select()
@@ -260,210 +211,15 @@ export default function Generate() {
     setIsGenerating(false);
   };
 
-  const toggleGenre = (g: string) => {
-    setGenres((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));
-  };
-
   return (
     <div className="flex h-[calc(100vh-3rem)] md:h-screen">
-      {/* Left: Settings Form */}
-      <ScrollArea className="w-full border-r border-border/50 md:w-[420px] lg:w-[480px]">
-        <div className="space-y-6 p-4 md:p-6">
-          <div className="flex items-center justify-between">
-            <h1 className="font-serif text-xl font-bold">创作设定</h1>
-            <Badge variant="outline" className="text-xs">
-              模型: {displayModelName}
-            </Badge>
-          </div>
-
-            {!currentApiKey && (
-              <Card className="border-amber-500/50 bg-amber-500/10">
-                <CardContent className="p-3 text-sm text-amber-700 dark:text-amber-400">
-                  ⚠️ 当前选中的提供商没有可用 API Key，生成将会失败。请前往<button onClick={() => navigate("/settings")} className="underline mx-1 font-medium">设置 → 模型设置</button>给默认提供商配置 API Key，或把已配置 Key 的提供商设为默认。
-                </CardContent>
-              </Card>
-            )}
-
-
-          {/* Genre Multi-select */}
-          <div className="space-y-2">
-            <Label>小说类型（可多选）</Label>
-            <div className="flex flex-wrap gap-2">
-              {allGenres.map((g) => (
-                <Badge
-                  key={g}
-                  variant={genres.includes(g) ? "default" : "outline"}
-                  className="cursor-pointer select-none"
-                  onClick={() => toggleGenre(g)}
-                >
-                  {g}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Protagonist */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">主角设定</Label>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">姓名</Label>
-                <Input placeholder="主角名字" value={protagonistName} onChange={(e) => setProtagonistName(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">性别</Label>
-                <Select value={protagonistGender} onValueChange={setProtagonistGender}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="男">男</SelectItem>
-                    <SelectItem value="女">女</SelectItem>
-                    <SelectItem value="其他">其他</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">年龄</Label>
-                <Input placeholder="如：18" value={protagonistAge} onChange={(e) => setProtagonistAge(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">性格</Label>
-                <Input placeholder="如：冷静、果断" value={protagonistPersonality} onChange={(e) => setProtagonistPersonality(e.target.value)} />
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* World & Conflict */}
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>世界观 / 时代背景</Label>
-              <Textarea placeholder="描述故事发生的世界..." value={worldSetting} onChange={(e) => setWorldSetting(e.target.value)} rows={3} />
-            </div>
-            <div className="space-y-1">
-              <Label>核心冲突 / 主题</Label>
-              <Input placeholder="如：复仇、成长、拯救世界..." value={conflict} onChange={(e) => setConflict(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>一句话简介</Label>
-              <Textarea placeholder="用一句话描述你的故事..." value={synopsis} onChange={(e) => setSynopsis(e.target.value)} rows={2} />
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Word count & Style */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>预计总字数</Label>
-              <Select value={totalWords} onValueChange={setTotalWords}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="50000">5万字</SelectItem>
-                  <SelectItem value="100000">10万字</SelectItem>
-                  <SelectItem value="300000">30万字</SelectItem>
-                  <SelectItem value="500000">50万字</SelectItem>
-                  <SelectItem value="1000000">100万字</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>单章字数</Label>
-              <Select value={chapterWords} onValueChange={setChapterWords}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="2000">2000字</SelectItem>
-                  <SelectItem value="3000">3000字</SelectItem>
-                  <SelectItem value="5000">5000字</SelectItem>
-                  <SelectItem value="8000">8000字</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>写作风格</Label>
-              <Select value={style} onValueChange={setStyle}>
-                <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
-                <SelectContent>
-                  {allStyles.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>叙事视角</Label>
-              <Select value={narration} onValueChange={setNarration}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {narrations.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Toggles */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>NSFW 内容</Label>
-              <Switch checked={nsfw} onCheckedChange={setNsfw} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label>系统文模式</Label>
-              <Switch checked={systemNovel} onCheckedChange={setSystemNovel} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label>后宫模式</Label>
-              <Switch checked={harem} onCheckedChange={setHarem} />
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Temperature */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>创意度 (Temperature)</Label>
-              <span className="text-sm text-muted-foreground">{temperature[0]}</span>
-            </div>
-            <Slider value={temperature} onValueChange={setTemperature} min={0} max={1} step={0.05} />
-            <p className="text-xs text-muted-foreground">低=保守严谨，高=天马行空</p>
-          </div>
-
-          <Separator />
-
-          {/* Action Buttons */}
-          <div className="space-y-3 pb-6">
-            {isGenerating ? (
-              <Button className="w-full" size="lg" variant="destructive" onClick={handleStop}>
-                <StopCircle className="mr-2 h-4 w-4" />
-                停止生成
-              </Button>
-            ) : (
-              <Button className="w-full" size="lg" onClick={() => handleGenerate("generate")}>
-                <PenTool className="mr-2 h-4 w-4" />
-                开始创作
-              </Button>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <Button variant="secondary" disabled={isGenerating} onClick={() => handleGenerate("outline")}>
-                <BookOpen className="mr-2 h-4 w-4" />
-                生成大纲
-              </Button>
-              <Button variant="secondary" disabled={isGenerating} onClick={() => handleGenerate("characters")}>
-                <Users className="mr-2 h-4 w-4" />
-                生成人物卡
-              </Button>
-            </div>
-          </div>
-        </div>
-      </ScrollArea>
+      {/* Left: 高级创作设定表单 */}
+      <NovelSettingsForm
+        modelName={displayModelName}
+        isGenerating={isGenerating}
+        onGenerate={handleGenerate}
+        onStop={handleStop}
+      />
 
       {/* Right: Preview Area */}
       <div className="hidden flex-1 flex-col md:flex">
