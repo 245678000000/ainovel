@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sanitize } from "./utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -222,35 +223,41 @@ function sleep(ms: number): Promise<void> {
 function extractUpstreamErrorMessage(rawText: string): string {
   if (!rawText) return "上游模型服务返回空错误信息";
 
+  let result = rawText;
   try {
     const parsed = JSON.parse(rawText) as {
       error?: string | { message?: string };
       message?: string;
     };
     if (typeof parsed.error === "string" && parsed.error.trim()) {
-      return parsed.error;
-    }
-    if (
+      result = parsed.error;
+    } else if (
       parsed.error &&
       typeof parsed.error === "object" &&
       typeof parsed.error.message === "string" &&
       parsed.error.message.trim()
     ) {
-      return parsed.error.message;
-    }
-    if (typeof parsed.message === "string" && parsed.message.trim()) {
-      return parsed.message;
+      result = parsed.error.message;
+    } else if (typeof parsed.message === "string" && parsed.message.trim()) {
+      result = parsed.message;
+    } else {
+      const messageMatch = rawText.match(/message["'\s:：]+([^,"'}\]\n]+)/i);
+      if (messageMatch?.[1]) {
+        result = messageMatch[1].trim();
+      } else {
+        result = rawText.slice(0, 300);
+      }
     }
   } catch {
-    // fall through to heuristic parsing
+    const messageMatch = rawText.match(/message["'\s:：]+([^,"'}\]\n]+)/i);
+    if (messageMatch?.[1]) {
+      result = messageMatch[1].trim();
+    } else {
+      result = rawText.slice(0, 300);
+    }
   }
 
-  const messageMatch = rawText.match(/message["'\s:：]+([^,"'}\]\n]+)/i);
-  if (messageMatch?.[1]) {
-    return messageMatch[1].trim();
-  }
-
-  return rawText.slice(0, 300);
+  return sanitize(result);
 }
 
 function buildUserPrompt(settings: any, context?: any): string {
@@ -611,7 +618,7 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "网络错误";
+        const msg = sanitize(e instanceof Error ? e.message : "网络错误");
         return new Response(JSON.stringify({ ok: false, error: msg }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -795,8 +802,8 @@ serve(async (req) => {
       },
     });
   } catch (e) {
-    console.error("generate-novel error:", e);
-    const message = e instanceof Error ? e.message : "未知错误";
+    console.error("generate-novel error:", sanitize(e));
+    const message = sanitize(e instanceof Error ? e.message : "未知错误");
     const isUpstreamError = /API error \[\d+\]/.test(message);
     return errorResponse(
       isUpstreamError ? 502 : 500,
