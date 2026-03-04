@@ -79,19 +79,34 @@ export default function Generate() {
     };
   }, []);
 
-    const enabledProviders = providers.filter((p) => p.enabled !== false);
     const normalizedDefaultModel = defaultModel.toLowerCase();
-    const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
+    const hasApiKey = (p: { api_key: string | null }) => Boolean(p.api_key?.trim());
 
-    const typeMatchedWithKey = enabledProviders.find(
-      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel && hasApiKey(p)
-    );
-    const defaultWithKey = enabledProviders.find((p) => p.is_default && hasApiKey(p));
-    const firstWithKey = enabledProviders.find((p) => hasApiKey(p));
-    const typeMatchedProvider = enabledProviders.find(
-      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel
-    );
-    const defaultProvider = enabledProviders.find((p) => p.is_default);
+    let typeMatchedWithKey = null;
+    let defaultWithKey = null;
+    let firstWithKey = null;
+    let typeMatchedProvider = null;
+    let defaultProvider = null;
+    let firstEnabled = null;
+
+    for (const p of providers) {
+      if (p.enabled === false) continue;
+
+      if (!firstEnabled) firstEnabled = p;
+
+      const hasKey = hasApiKey(p);
+      const isTypeMatch = p.provider_type.toLowerCase() === normalizedDefaultModel;
+
+      if (isTypeMatch && hasKey) {
+        typeMatchedWithKey = p;
+        break; // Highest priority match found, can stop early
+      }
+
+      if (!defaultWithKey && p.is_default && hasKey) defaultWithKey = p;
+      if (!firstWithKey && hasKey) firstWithKey = p;
+      if (!typeMatchedProvider && isTypeMatch) typeMatchedProvider = p;
+      if (!defaultProvider && p.is_default) defaultProvider = p;
+    }
 
     const matchedProvider =
       typeMatchedWithKey ||
@@ -99,7 +114,7 @@ export default function Generate() {
       firstWithKey ||
       typeMatchedProvider ||
       defaultProvider ||
-      enabledProviders[0];
+      firstEnabled;
 
     const currentApiKey = matchedProvider?.api_key?.trim() || "";
 
