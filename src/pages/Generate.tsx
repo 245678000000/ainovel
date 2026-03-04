@@ -1,5 +1,4 @@
-import { useCallback } from "react";
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -8,6 +7,7 @@ import { PROVIDER_TYPES } from "@/lib/provider-types";
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, Loader2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useModelProviders } from "@/hooks/useModelProviders";
 import ReactMarkdown from "react-markdown";
 import { NovelSettingsForm, GenerateMode } from "@/components/novel-settings/NovelSettingsForm";
 import { NovelSettings } from "@/components/novel-settings/types";
@@ -22,49 +22,11 @@ export default function Generate() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
   const [generationMode, setGenerationMode] = useState("");
-  const [providers, setProviders] = useState<{ provider_type: string; api_key: string | null; is_default: boolean | null; name: string; default_model: string | null; enabled: boolean | null; api_base_url: string | null }[]>([]);
-  const [defaultModel, setDefaultModel] = useState("deepseek");
+  const { providers, defaultModel } = useModelProviders();
+
   const abortRef = useRef(false);
   const requestAbortControllerRef = useRef<AbortController | null>(null);
   const [latestSettings, setLatestSettings] = useState<NovelSettings | null>(null);
-
-  const loadSettings = useCallback(async () => {
-    if (!user) return;
-    const [{ data: profile }, { data: providerData }] = await Promise.all([
-      supabase.from("profiles").select("default_llm_model, nsfw_enabled").eq("user_id", user.id).single(),
-      supabase.from("model_providers").select("provider_type, api_key, is_default, name, default_model, enabled, api_base_url").eq("user_id", user.id),
-    ]);
-    if (providerData) {
-      setProviders(providerData);
-    }
-    if (profile) {
-      let model = profile.default_llm_model;
-      if (!model && providerData && providerData.length > 0) {
-        const def = providerData.find((p) => p.is_default && p.enabled !== false);
-        const first = providerData.find((p) => p.enabled !== false);
-        model = (def || first)?.provider_type || null;
-      }
-      setDefaultModel(model || "deepseek");
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    loadSettings();
-
-    const onSettingsChanged = () => loadSettings();
-    window.addEventListener("model-settings-changed", onSettingsChanged);
-
-    const onVisible = () => {
-      if (document.visibilityState === "visible") loadSettings();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      window.removeEventListener("model-settings-changed", onSettingsChanged);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [user, loadSettings]);
 
   // Auto-scroll preview
   useEffect(() => {
@@ -80,186 +42,250 @@ export default function Generate() {
     };
   }, []);
 
-    const enabledProviders = providers.filter((p) => p.enabled !== false);
-    const normalizedDefaultModel = defaultModel.toLowerCase();
-    const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
+  const enabledProviders = providers.filter((p) => p.enabled !== false);
+  const normalizedDefaultModel = defaultModel.toLowerCase();
+  const hasApiKey = (provider: { api_key: string | null }) => Boolean(provider.api_key?.trim());
 
-    const typeMatchedWithKey = enabledProviders.find(
-      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel && hasApiKey(p)
-    );
-    const defaultWithKey = enabledProviders.find((p) => p.is_default && hasApiKey(p));
-    const firstWithKey = enabledProviders.find((p) => hasApiKey(p));
-    const typeMatchedProvider = enabledProviders.find(
-      (p) => p.provider_type.toLowerCase() === normalizedDefaultModel
-    );
-    const defaultProvider = enabledProviders.find((p) => p.is_default);
+  const typeMatchedWithKey = enabledProviders.find(
+    (p) => p.provider_type.toLowerCase() === normalizedDefaultModel && hasApiKey(p)
+  );
+  const defaultWithKey = enabledProviders.find((p) => p.is_default && hasApiKey(p));
+  const firstWithKey = enabledProviders.find((p) => hasApiKey(p));
+  const typeMatchedProvider = enabledProviders.find(
+    (p) => p.provider_type.toLowerCase() === normalizedDefaultModel
+  );
+  const defaultProvider = enabledProviders.find((p) => p.is_default);
 
-    const matchedProvider =
-      typeMatchedWithKey ||
-      defaultWithKey ||
-      firstWithKey ||
-      typeMatchedProvider ||
-      defaultProvider ||
-      enabledProviders[0];
+  const matchedProvider =
+    typeMatchedWithKey ||
+    defaultWithKey ||
+    firstWithKey ||
+    typeMatchedProvider ||
+    defaultProvider ||
+    enabledProviders[0];
 
-    const currentApiKey = matchedProvider?.api_key?.trim() || "";
-
-  const activeModelType = matchedProvider?.provider_type || defaultModel;
-  // 不再强制 fallback 到 grok，直接使用用户配置的提供商，让后端判断是否缺 Key
-  const effectiveProvider = activeModelType;
-  const effectiveApiBaseUrl = matchedProvider?.api_base_url || undefined;
-  const effectiveActualModel = matchedProvider?.default_model || undefined;
-  const displayModelName =
-    PROVIDER_TYPES.find((p) => p.value.toLowerCase() === effectiveProvider.toLowerCase())?.label ||
-    matchedProvider?.name ||
-    effectiveProvider;
+  const targetModelName =
+    matchedProvider?.provider_type || normalizedDefaultModel || "deepseek";
+  const apiBaseUrl = matchedProvider?.api_base_url || undefined;
+  const actualModelName = matchedProvider?.default_model || undefined;
 
   const handleGenerate = async (mode: GenerateMode, settings: NovelSettings) => {
-    if (!session?.access_token) {
-      toast({ title: "未登录", description: "请先登录", variant: "destructive" });
+    if (!session) {
+      toast({
+        title: "错误",
+        description: "需要登录才能使用大模型",
+        variant: "destructive",
+      });
       return;
     }
-    setLatestSettings(settings);
+
+    if (!matchedProvider || (!matchedProvider.api_key && matchedProvider.provider_type !== "custom")) {
+      toast({
+        title: "配置缺失",
+        description: "请先在右上角「设置」中配置您的模型 API Key。",
+        variant: "destructive",
+      });
+      navigate("/settings");
+      return;
+    }
+
     setIsGenerating(true);
     setPreviewContent("");
     setGenerationMode(mode);
+    setLatestSettings(settings);
     abortRef.current = false;
-    requestAbortControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestAbortControllerRef.current = controller;
-    let fullContent = "";
 
-    await streamNovelGeneration({
-      params: {
-        mode,
-        settings,
-        model: effectiveProvider,
-        apiKey: currentApiKey,
-        apiBaseUrl: effectiveApiBaseUrl,
-        actualModel: effectiveActualModel,
-        temperature: settings.writingStyle.temperature,
-        chapterNumber: 1,
-      },
-      onDelta: (text) => {
-        if (abortRef.current) return;
-        fullContent += text;
-        setPreviewContent(fullContent);
-      },
-      onDone: async () => {
-        requestAbortControllerRef.current = null;
-        setIsGenerating(false);
-        if (abortRef.current) return;
+    if (requestAbortControllerRef.current) {
+      requestAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    requestAbortControllerRef.current = abortController;
 
-        // Auto-save based on mode
-        if (mode === "generate" && user) {
-          try {
-            const lines = fullContent.split("\n").filter((l) => l.trim());
-            const chapterTitle = lines[0]?.replace(/^#+\s*/, "").replace(/^第.+章\s*/, "") || "第一章";
-            const chapterContent = lines.slice(1).join("\n").trim();
-            const initialWordCount = chapterContent.length || fullContent.trim().length;
+    const apiKeyToUse = matchedProvider.api_key || "";
 
-            // Create novel
-            const { data: novel, error: novelErr } = await supabase
-              .from("novels")
-              .insert({
-                user_id: user.id,
-                title: settings.mainCharacter.name
-                  ? `${settings.mainCharacter.name}的故事`
-                  : "未命名小说",
-                genre: settings.genres,
-                settings_json: settings,
-                word_count: initialWordCount,
-              })
-              .select()
-              .single();
-
-            if (novelErr) throw novelErr;
-
-            const { error: chapterErr } = await supabase.from("chapters").insert({
-              novel_id: novel.id,
-              chapter_number: 1,
-              title: chapterTitle,
-              content: chapterContent,
-              word_count: chapterContent.length,
-            });
-            if (chapterErr) throw chapterErr;
-
-            toast({ title: "创作完成", description: "小说已自动保存到书库" });
-          } catch (e: unknown) {
-            toast({ title: "保存失败", description: e.message, variant: "destructive" });
-          }
-        } else if (mode === "outline" && user) {
-          toast({ title: "大纲生成完成", description: "开始创作时将自动使用此大纲" });
-        } else if (mode === "characters") {
-          toast({ title: "人物卡生成完成" });
-        }
-      },
-      onError: (error) => {
-        requestAbortControllerRef.current = null;
-        if (abortRef.current) return;
-        setIsGenerating(false);
-        toast({ title: "生成失败", description: error, variant: "destructive" });
-      },
-      accessToken: session.access_token,
-      signal: controller.signal,
-    });
+    try {
+      await streamNovelGeneration({
+        params: {
+          mode,
+          settings,
+          model: targetModelName,
+          apiKey: apiKeyToUse,
+          apiBaseUrl,
+          actualModel: actualModelName,
+        },
+        accessToken: session.access_token,
+        signal: abortController.signal,
+        onDelta: (text) => {
+          if (abortRef.current) return;
+          setPreviewContent((prev) => prev + text);
+        },
+        onDone: async () => {
+          if (abortRef.current) return;
+          setIsGenerating(false);
+          setGenerationMode("");
+        },
+        onError: (err) => {
+          if (abortRef.current || abortController.signal.aborted) return;
+          setIsGenerating(false);
+          setGenerationMode("");
+          toast({
+            title: "生成失败",
+            description: err,
+            variant: "destructive",
+          });
+        },
+      });
+    } catch (e: unknown) {
+      if (abortRef.current || abortController.signal.aborted) return;
+      setIsGenerating(false);
+      setGenerationMode("");
+      toast({
+        title: "发生错误",
+        description: e instanceof Error ? e.message : "请求失败",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleStop = () => {
     abortRef.current = true;
-    requestAbortControllerRef.current?.abort();
-    requestAbortControllerRef.current = null;
+    if (requestAbortControllerRef.current) {
+      requestAbortControllerRef.current.abort();
+      requestAbortControllerRef.current = null;
+    }
     setIsGenerating(false);
+    setGenerationMode("");
+    toast({
+      title: "已停止",
+      description: "生成进程已被手动中止。",
+    });
   };
 
-  return (
-    <div className="flex h-[calc(100vh-3rem)] md:h-screen">
-      {/* Left: 高级创作设定表单 */}
-      <NovelSettingsForm
-        modelName={displayModelName}
-        isGenerating={isGenerating}
-        onGenerate={handleGenerate}
-        onStop={handleStop}
-      />
+  const handleSaveToLibrary = async () => {
+    if (!user || !latestSettings) return;
 
-      {/* Right: Preview Area */}
-      <div className="hidden flex-1 flex-col md:flex">
-        <div className="flex h-12 items-center justify-between border-b border-border/50 px-6">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium text-muted-foreground">实时预览</span>
-          </div>
-          {isGenerating && (
-            <div className="flex items-center gap-2 text-sm text-primary">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              正在创作中...
-            </div>
+    if (!previewContent.trim()) {
+      toast({ title: "提示", description: "没有生成的内容可保存" });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("novels")
+      .insert([
+        {
+          user_id: user.id,
+          title: latestSettings.title || "未命名小说",
+          genre: latestSettings.genres.join(", ") || "未分类",
+          word_count: previewContent.length,
+          outline: previewContent,
+          settings_json: latestSettings,
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      toast({
+        title: "保存失败",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "保存成功",
+        description: "设定和大纲已存入您的书架",
+      });
+      navigate(`/novel/${data.id}`);
+    }
+  };
+
+  const currentProviderInfo = PROVIDER_TYPES.find(
+    (p) => p.id === targetModelName
+  );
+
+  return (
+    <div className="container py-8 max-w-[1600px] h-[calc(100vh-3rem)]">
+      <div className="mb-8 flex items-end justify-between">
+        <div>
+          <h1 className="text-3xl font-serif font-bold text-foreground flex items-center gap-2">
+            <Sparkles className="h-6 w-6 text-primary" />
+            AI 智能生成
+          </h1>
+          <p className="text-muted-foreground mt-2 font-medium">
+            填写设定表单，AI
+            将为您构建宏大世界与细腻情节，生成结果可直接作为提示词或大纲。
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {session ? (
+            <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+              当前使用模型: {currentProviderInfo?.name || targetModelName.toUpperCase()}
+              {actualModelName ? ` (${actualModelName})` : ""}
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="animate-pulse">未登录</Badge>
           )}
         </div>
-        <div ref={previewRef} className="flex-1 overflow-auto p-8">
-          {previewContent ? (
-            <div className="mx-auto max-w-3xl font-serif text-base leading-loose text-foreground/90">
-              <ReactMarkdown
-                components={{
-                  h1: ({ children }) => <h1 className="mb-6 text-2xl font-bold text-center">{children}</h1>,
-                  h2: ({ children }) => <h2 className="mb-4 mt-8 text-xl font-bold">{children}</h2>,
-                  h3: ({ children }) => <h3 className="mb-3 mt-6 text-lg font-semibold">{children}</h3>,
-                  p: ({ children }) => <p className="mb-4 indent-8 leading-loose">{children}</p>,
-                  code: ({ children }) => <pre className="my-4 rounded-lg bg-muted p-4 text-sm overflow-x-auto"><code>{children}</code></pre>,
-                }}
-              >
-                {previewContent}
-              </ReactMarkdown>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[calc(100%-6rem)]">
+        <div className="h-full min-h-[600px]">
+          <NovelSettingsForm
+            modelName={targetModelName}
+            isGenerating={isGenerating}
+            onGenerate={handleGenerate}
+            onStop={handleStop}
+          />
+        </div>
+
+        <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl overflow-hidden shadow-sm">
+          <div className="border-b border-border/50 bg-background/50 px-6 py-4 flex items-center justify-between shrink-0">
+            <h2 className="font-serif font-semibold flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-primary" />
+              {isGenerating ? "正在生成..." : "生成结果"}
+            </h2>
+            <div className="flex gap-2">
+              <Badge variant="secondary" className="opacity-80">
+                {generationMode === "outline" ? "故事大纲" : generationMode === "characters" ? "角色卡片" : "世界观与背景"}
+              </Badge>
+              {previewContent && !isGenerating && (
+                <button
+                  onClick={handleSaveToLibrary}
+                  className="text-xs px-3 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+                >
+                  存入书架
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-center text-muted-foreground">
-              <div>
-                <BookOpen className="mx-auto mb-4 h-16 w-16 opacity-20" />
-                <p className="text-lg">设定好参数后，点击"开始创作"</p>
-                <p className="text-sm">AI将在这里实时生成你的小说</p>
+          </div>
+
+          <div className="flex-1 overflow-hidden relative">
+            {isGenerating && (
+              <div className="absolute top-4 right-4 z-10 flex items-center gap-2 text-primary text-sm font-medium bg-background/80 px-3 py-1.5 rounded-full border border-primary/20 shadow-sm backdrop-blur-md">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在构思...
               </div>
+            )}
+
+            <div
+              ref={previewRef}
+              className="h-full overflow-y-auto p-6 prose prose-stone dark:prose-invert max-w-none
+                         prose-headings:font-serif prose-h1:text-2xl prose-h2:text-xl
+                         prose-p:leading-relaxed prose-p:text-muted-foreground
+                         scroll-smooth"
+            >
+              {!previewContent && !isGenerating ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 space-y-4">
+                  <div className="p-4 rounded-full bg-secondary/50">
+                    <Sparkles className="h-8 w-8 opacity-50" />
+                  </div>
+                  <p>点击左侧的生成按钮，开启创作之旅</p>
+                </div>
+              ) : (
+                <ReactMarkdown>{previewContent}</ReactMarkdown>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

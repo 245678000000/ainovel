@@ -1,135 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { SYSTEM_PROMPT, OUTLINE_SYSTEM_PROMPT, CHARACTER_SYSTEM_PROMPT, REWRITE_SYSTEM_PROMPT } from "./prompts.ts";
+import { PROVIDER_CONFIGS, PROVIDER_KEYS, normalizeBaseUrl, buildOpenAIEndpoint, buildClaudeEndpoint, inferProviderFromModel, ProviderKey, ProviderProtocol, ProviderConfig, UserProviderConfig } from "./providers.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-const SYSTEM_PROMPT = `You are a top Chinese web novelist with 15 years experience. Write in beautiful, addictive simplified Chinese. Follow all user settings strictly. Every chapter must end with a hook. Never add author notes. Output ONLY the chapter title and pure text content.`;
-
-const OUTLINE_SYSTEM_PROMPT = `You are a top Chinese web novelist. Generate a detailed novel outline in simplified Chinese. Include: overall story arc, chapter breakdown with brief descriptions, major plot points, climax, and ending. Format as structured markdown. Output ONLY the outline content.`;
-
-const CHARACTER_SYSTEM_PROMPT = `You are a top Chinese web novelist. Generate detailed character cards in simplified Chinese as a JSON array. Each character should have: name, gender, age, personality, appearance, background, abilities, relationships, and role in the story. Output ONLY valid JSON.`;
-
-const REWRITE_SYSTEM_PROMPT = `You are a top Chinese web novelist with 15 years experience. Rewrite the given chapter in simplified Chinese, improving quality, pacing, and engagement. Keep the core plot points but enhance the writing. Every chapter must end with a hook. Never add author notes. Output ONLY the chapter title and pure text content.`;
-
-const ALLOWED_MODES = new Set([
-  "generate",
-  "outline",
-  "characters",
-  "rewrite",
-  "continue",
-  "test",
-]);
-const MAX_UPSTREAM_RETRIES = 2;
-
-type ProviderProtocol = "openai-compatible" | "anthropic";
-type ProviderKey =
-  | "openai"
-  | "deepseek"
-  | "claude"
-  | "grok"
-  | "qwen"
-  | "siliconflow"
-  | "ollama"
-  | "custom";
-
-interface ProviderConfig {
-  protocol: ProviderProtocol;
-  defaultBaseUrl: string;
-  defaultModel: string;
-}
-
-interface UserProviderConfig {
-  provider_type: string;
-  api_key: string | null;
-  api_base_url: string | null;
-  default_model: string | null;
-  is_default: boolean | null;
-}
-
-const PROVIDER_CONFIGS: Record<ProviderKey, ProviderConfig> = {
-  openai: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-4o-mini",
-  },
-  deepseek: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "https://api.deepseek.com/v1",
-    defaultModel: "deepseek-chat",
-  },
-  claude: {
-    protocol: "anthropic",
-    defaultBaseUrl: "https://api.anthropic.com/v1",
-    defaultModel: "claude-3-5-sonnet-20241022",
-  },
-  grok: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "https://api.x.ai/v1",
-    defaultModel: "grok-3",
-  },
-  qwen: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    defaultModel: "qwen-plus",
-  },
-  siliconflow: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "https://api.siliconflow.cn/v1",
-    defaultModel: "deepseek-ai/DeepSeek-V3",
-  },
-  ollama: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "http://localhost:11434/v1",
-    defaultModel: "llama3",
-  },
-  custom: {
-    protocol: "openai-compatible",
-    defaultBaseUrl: "",
-    defaultModel: "gpt-4o-mini",
-  },
-};
-
-const PROVIDER_KEYS = new Set<ProviderKey>(
-  Object.keys(PROVIDER_CONFIGS) as ProviderKey[]
-);
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, "");
-}
-
-function buildOpenAIEndpoint(baseUrl: string): string {
-  const normalized = normalizeBaseUrl(baseUrl);
-  if (!normalized) return "";
-  return normalized.endsWith("/chat/completions")
-    ? normalized
-    : `${normalized}/chat/completions`;
-}
-
-function buildClaudeEndpoint(baseUrl: string): string {
-  const normalized = normalizeBaseUrl(baseUrl);
-  if (!normalized) return "";
-  return normalized.endsWith("/messages")
-    ? normalized
-    : `${normalized}/messages`;
-}
-
-function inferProviderFromModel(modelName: string): ProviderKey {
-  const value = modelName.toLowerCase();
-
-  if (value.includes("claude")) return "claude";
-  if (value.includes("grok")) return "grok";
-  if (value.includes("deepseek")) return "deepseek";
-  if (value.includes("qwen")) return "qwen";
-  if (value.includes("silicon")) return "siliconflow";
-  if (value.includes("ollama") || value.includes("llama")) return "ollama";
-  if (value.includes("gpt") || value.includes("openai")) return "openai";
-
-  return "custom";
-}
 
 function resolveProvider(model: unknown): ProviderKey {
   if (typeof model !== "string") return "custom";
