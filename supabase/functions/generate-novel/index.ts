@@ -84,7 +84,7 @@ const PROVIDER_CONFIGS: Record<ProviderKey, ProviderConfig> = {
   },
   ollama: {
     protocol: "openai-compatible",
-    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultBaseUrl: "",
     defaultModel: "llama3",
   },
   custom: {
@@ -166,6 +166,67 @@ function resolveBaseUrl(apiBaseUrl: unknown, provider: ProviderKey): string {
     return normalizeBaseUrl(apiBaseUrl);
   }
   return normalizeBaseUrl(PROVIDER_CONFIGS[provider].defaultBaseUrl);
+}
+
+function isPrivateOrLocalIp(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+
+  if (!normalized) return true;
+  if (normalized === "localhost" || normalized.endsWith(".localhost")) {
+    return true;
+  }
+
+  // Basic IPv6 local/private checks.
+  if (normalized.includes(":")) {
+    return (
+      normalized === "::1" ||
+      normalized === "::" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe8") ||
+      normalized.startsWith("fe9") ||
+      normalized.startsWith("fea") ||
+      normalized.startsWith("feb")
+    );
+  }
+
+  const ipv4Match = normalized.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (!ipv4Match) return false;
+
+  const octets = normalized.split(".").map((part) => Number(part));
+  if (octets.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+
+  const [a, b] = octets;
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function validateBaseUrl(baseUrl: string): string | null {
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== "https:") {
+      return "仅允许使用 https 协议的 API 地址";
+    }
+    if (parsed.username || parsed.password) {
+      return "API 地址不能包含用户名或密码";
+    }
+    if (!parsed.hostname) {
+      return "API 地址缺少主机名";
+    }
+    if (isPrivateOrLocalIp(parsed.hostname)) {
+      return "不允许使用内网或本地地址";
+    }
+    return null;
+  } catch {
+    return "API 地址格式无效";
+  }
 }
 
 function resolveApiKey(provider: ProviderKey, userApiKey: unknown): string {
@@ -572,6 +633,13 @@ serve(async (req) => {
         });
       }
 
+      const testBaseUrlValidationError = validateBaseUrl(normalizeBaseUrl(testBaseUrl));
+      if (testBaseUrlValidationError) {
+        return new Response(JSON.stringify({ ok: false, error: testBaseUrlValidationError }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       try {
         let testRes: Response;
         if (testProviderType === "claude") {
@@ -691,6 +759,11 @@ serve(async (req) => {
         "API_BASE_URL_REQUIRED",
         "请先配置有效的 API Base URL"
       );
+    }
+
+    const baseUrlValidationError = validateBaseUrl(resolvedBaseUrl);
+    if (baseUrlValidationError) {
+      return errorResponse(400, "API_BASE_URL_INVALID", baseUrlValidationError);
     }
 
     if (!resolvedModel) {
