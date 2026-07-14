@@ -11,7 +11,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="flex min-h-screen w-full">
           <AppSidebar />
           <main className="flex-1 overflow-auto">
-            <div className="sticky top-0 z-10 flex h-12 items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-md px-4">
+            <div className="sticky top-0 z-10 flex h-12 items-center justify-between border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-black/30 backdrop-blur-xl px-4">
               <div className="flex items-center md:hidden">
                 <SidebarTrigger />
                 <span className="ml-3 font-serif text-sm font-medium">小说AI工坊</span>

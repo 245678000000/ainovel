@@ -33,7 +33,7 @@ export default function Index() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-3rem)] md:min-h-screen gradient-hero">
+    <div className="min-h-[calc(100vh-3rem)] md:min-h-screen gradient-hero bg-[length:200%_200%] animate-gradient-slow">
       {/* Hero */}
       <section className="flex flex-col items-center justify-center px-4 pt-16 pb-8 md:pt-24">
         <div className="mb-4 flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm text-primary">
@@ -103,7 +103,7 @@ export default function Index() {
             <Button
               onClick={handleQuickStart}
               size="lg"
-              className="mt-6 w-full text-base font-semibold"
+              className="mt-6 w-full text-base font-semibold bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/95 hover:to-indigo-600/95 transition-all duration-300 transform hover:scale-[1.01] hover:shadow-lg hover:shadow-primary/20 active:scale-[0.99]"
             >
               <PenIcon className="mr-2 h-5 w-5" />
               立即开始创作
@@ -120,7 +120,7 @@ export default function Index() {
             { icon: BookOpen, title: "多类型支持", desc: "玄幻、仙侠、都市、言情、科幻等十余种类型" },
             { icon: Feather, title: "精细控制", desc: "人物卡、世界观、大纲、风格、温度全方位定制" },
           ].map(({ icon: Icon, title, desc }) => (
-            <Card key={title} className="glass border-border/30">
+            <Card key={title} className="glass border-white/20 dark:border-white/5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-lg hover:shadow-primary/5 hover:border-primary/30">
               <CardContent className="p-6">
                 <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                   <Icon className="h-5 w-5 text-primary" />

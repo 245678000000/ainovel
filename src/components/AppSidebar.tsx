@@ -24,7 +24,7 @@ export function AppSidebar() {
   const { signOut, user } = useAuth();
 
   return (
-    <Sidebar className="border-r border-border/50">
+    <Sidebar className="border-r border-white/20 dark:border-white/5 bg-white/25 dark:bg-card/25 backdrop-blur-xl [&>[data-sidebar=sidebar]]:bg-transparent">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20">

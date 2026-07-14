@@ -1,7 +1,7 @@
 // Streaming helper for novel generation edge function
 
 export interface StreamNovelParams {
-  mode: "generate" | "outline" | "characters" | "rewrite" | "continue";
+  mode: "generate" | "outline" | "characters" | "rewrite" | "continue" | "continue_chapter";
   settings: Record<string, any>;
   model: string;
   apiKey: string;
@@ -11,6 +11,9 @@ export interface StreamNovelParams {
   novelId?: string;
   chapterNumber?: number;
   rewriteContent?: string;
+  currentText?: string;
+  currentChapterTitle?: string;
+  currentChapterNumber?: number;
 }
 
 export async function streamNovelGeneration({
@@ -86,6 +89,7 @@ export async function streamNovelGeneration({
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let pendingLine = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -100,6 +104,16 @@ export async function streamNovelGeneration({
 
         if (line.endsWith("\r")) line = line.slice(0, -1);
         if (line.startsWith(":") || line.trim() === "") continue;
+
+        if (pendingLine) {
+          if (line.startsWith("data: ")) {
+            pendingLine = "";
+          } else {
+            line = pendingLine + line;
+            pendingLine = "";
+          }
+        }
+
         if (!line.startsWith("data: ")) continue;
 
         const jsonStr = line.slice(6).trim();
@@ -113,19 +127,29 @@ export async function streamNovelGeneration({
           const content = parsed.choices?.[0]?.delta?.content as string | undefined;
           if (content) onDelta(content);
         } catch {
-          // Partial JSON, put back
-          buffer = line + "\n" + buffer;
-          break;
+          // 残缺 JSON，将其暂存到 pendingLine 中，不再执行 buffer 倒退拼接，避免污染和死锁
+          pendingLine = line;
         }
       }
     }
 
     // Final flush
-    if (buffer.trim()) {
-      for (let raw of buffer.split("\n")) {
-        if (!raw) continue;
+    if (buffer.trim() || pendingLine) {
+      const raws = buffer.split("\n");
+      for (let i = 0; i < raws.length; i++) {
+        let raw = raws[i];
         if (raw.endsWith("\r")) raw = raw.slice(0, -1);
         if (raw.startsWith(":") || raw.trim() === "") continue;
+
+        if (pendingLine) {
+          if (raw.startsWith("data: ")) {
+            pendingLine = "";
+          } else {
+            raw = pendingLine + raw;
+            pendingLine = "";
+          }
+        }
+
         if (!raw.startsWith("data: ")) continue;
         const jsonStr = raw.slice(6).trim();
         if (jsonStr === "[DONE]") continue;

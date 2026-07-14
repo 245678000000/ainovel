@@ -84,7 +84,7 @@ export default function LibraryPage() {
   };
 
   return (
-    <div className="p-4 md:p-8">
+    <div className="p-4 md:p-8 bg-gradient-soft bg-[length:200%_200%] animate-gradient-slow min-h-screen">
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <h1 className="font-serif text-2xl font-bold">我的书库</h1>
         <Button onClick={() => navigate("/generate")}>
@@ -129,7 +129,7 @@ export default function LibraryPage() {
           {filtered.map((novel) => (
             <Card
               key={novel.id}
-              className="glass cursor-pointer transition-all hover:glow-purple hover:border-primary/30"
+              className="glass cursor-pointer transition-all duration-300 hover:translate-y-[-4px] hover:shadow-xl hover:glow-purple hover:border-primary/30"
               onClick={() => navigate(`/novel/${novel.id}`)}
             >
               <CardContent className="p-5">

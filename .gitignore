@@ -26,3 +26,4 @@ dist-ssr
 
 # Supabase local CLI temp files
 supabase/.temp/
+.agents/

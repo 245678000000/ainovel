@@ -15,12 +15,15 @@ const CHARACTER_SYSTEM_PROMPT = `You are a top Chinese web novelist. Generate de
 
 const REWRITE_SYSTEM_PROMPT = `You are a top Chinese web novelist with 15 years experience. Rewrite the given chapter in simplified Chinese, improving quality, pacing, and engagement. Keep the core plot points but enhance the writing. Every chapter must end with a hook. Never add author notes. Output ONLY the chapter title and pure text content.`;
 
+const CONTINUE_CHAPTER_SYSTEM_PROMPT = `You are a top Chinese web novelist with 15 years experience. Write in beautiful, addictive simplified Chinese. Follow all user settings strictly. You are continuing to write the current chapter based on the provided existing text. Do NOT output the chapter title, and do NOT output any chapter number or formatting marks. Start writing directly from where the existing text ends, maintaining the exact style, tone, and character voices. Output ONLY the continued text, nothing else.`;
+
 const ALLOWED_MODES = new Set([
   "generate",
   "outline",
   "characters",
   "rewrite",
   "continue",
+  "continue_chapter",
   "test",
 ]);
 const MAX_UPSTREAM_RETRIES = 2;
@@ -387,6 +390,7 @@ async function streamClaude({
   userPrompt: string;
   temperature: number;
 }): Promise<Response> {
+  const abortController = new AbortController();
   let response: Response | null = null;
   let lastError = "Claude API 调用失败";
 
@@ -407,6 +411,7 @@ async function streamClaude({
           temperature,
           max_tokens: 4096,
         }),
+        signal: abortController.signal,
       });
 
       if (response.ok) break;
@@ -478,6 +483,11 @@ async function streamClaude({
         }
       }
     },
+    cancel(reason) {
+      // 显式中止请求并取消读取流，以释放网络连接和防止 Token 泄露
+      abortController.abort();
+      reader.cancel(reason);
+    }
   });
 
   return new Response(stream, {
@@ -543,7 +553,7 @@ serve(async (req) => {
       return errorResponse(
         400,
         "INVALID_MODE",
-        "无效的生成模式，支持 generate/outline/characters/rewrite/continue/test"
+        "无效的生成模式，支持 generate/outline/characters/rewrite/continue/continue_chapter/test"
       );
     }
 
@@ -644,8 +654,19 @@ serve(async (req) => {
         ? Math.max(0, Math.min(2, body.temperature))
         : 0.7;
 
-    if (mode === "continue" && !novelId) {
+    if ((mode === "continue" || mode === "continue_chapter") && !novelId) {
       return errorResponse(400, "NOVEL_ID_REQUIRED", "继续写作需要 novelId");
+    }
+
+    if (mode === "continue_chapter") {
+      const currentText = typeof body.currentText === "string" ? body.currentText : undefined;
+      if (!currentText || !currentText.trim()) {
+        return errorResponse(
+          400,
+          "CURRENT_TEXT_REQUIRED",
+          "续写模式需要已有的正文内容"
+        );
+      }
     }
 
     if (mode === "rewrite" && !rewriteContent?.trim()) {
@@ -725,7 +746,7 @@ serve(async (req) => {
 
     // Build context for continue mode
     let context: any = {};
-    if (mode === "continue" && novelId) {
+    if ((mode === "continue" || mode === "continue_chapter") && novelId) {
       const [novelRes, chaptersRes, charsRes] = await Promise.all([
         supabase.from("novels").select("outline").eq("id", novelId).single(),
         supabase
@@ -738,6 +759,10 @@ serve(async (req) => {
           .select("name, card_json")
           .eq("novel_id", novelId),
       ]);
+
+      if (!novelRes.data) {
+        return errorResponse(404, "NOVEL_NOT_FOUND", "小说不存在或您没有访问权限");
+      }
 
       context.outline = truncateContext(novelRes.data?.outline || "", 4000);
       context.characters = charsRes.data || [];
@@ -753,6 +778,13 @@ serve(async (req) => {
       userPrompt = buildUserPrompt(settings, context);
     } else if (mode === "continue") {
       userPrompt = buildUserPrompt(settings, context);
+    } else if (mode === "continue_chapter") {
+      systemPrompt = CONTINUE_CHAPTER_SYSTEM_PROMPT;
+      const currentText = typeof body.currentText === "string" ? body.currentText : "";
+      const currentChapterTitle = typeof body.currentChapterTitle === "string" ? body.currentChapterTitle : "无标题";
+      const currentChapterNumber = typeof body.currentChapterNumber === "number" ? body.currentChapterNumber : 1;
+
+      userPrompt = `【小说设定与背景】\n${buildUserPrompt(settings, context)}\n\n【当前章节背景】\n章节序号：第 ${currentChapterNumber} 章\n章节标题：${currentChapterTitle}\n\n【已有正文内容（请在该正文的句尾继续往下书写，维持剧情连贯）】\n"""\n${currentText}\n"""\n\n请注意：\n1. 紧接着“已有正文内容”的最后一句往下写，切忌重复已有文字，剧情推进要合逻辑。\n2. 保持相同的语气、文风、视角以及角色对话口吻。\n3. 严格禁止输出标题、章节头信息、或任何解释说明性前缀/后缀。直接输出续写正文。`;
     } else if (mode === "outline") {
       systemPrompt = OUTLINE_SYSTEM_PROMPT;
       userPrompt = buildUserPrompt(settings) + `\n\n请生成一个详细的长篇小说大纲，包含章节规划。预计总字数：${settings.totalWords || "100000"}字。`;

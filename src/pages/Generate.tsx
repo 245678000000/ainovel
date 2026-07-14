@@ -212,7 +212,7 @@ export default function Generate() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] md:h-screen">
+    <div className="flex h-[calc(100vh-3rem)] md:h-screen bg-gradient-soft bg-[length:200%_200%] animate-gradient-slow">
       {/* Left: 高级创作设定表单 */}
       <NovelSettingsForm
         modelName={displayModelName}
@@ -237,7 +237,7 @@ export default function Generate() {
         </div>
         <div ref={previewRef} className="flex-1 overflow-auto p-8">
           {previewContent ? (
-            <div className="mx-auto max-w-3xl font-serif text-base leading-loose text-foreground/90">
+            <div className="mx-auto max-w-3xl glass p-8 md:p-12 rounded-xl shadow-xl font-serif text-base leading-loose text-foreground/90 border border-white/20 dark:border-white/5 relative overflow-hidden">
               <ReactMarkdown
                 components={{
                   h1: ({ children }) => <h1 className="mb-6 text-2xl font-bold text-center">{children}</h1>,
@@ -253,7 +253,7 @@ export default function Generate() {
           ) : (
             <div className="flex h-full items-center justify-center text-center text-muted-foreground">
               <div>
-                <BookOpen className="mx-auto mb-4 h-16 w-16 opacity-20" />
+                <BookOpen className="mx-auto mb-4 h-16 w-16 opacity-20 animate-pulse text-primary" />
                 <p className="text-lg">设定好参数后，点击"开始创作"</p>
                 <p className="text-sm">AI将在这里实时生成你的小说</p>
               </div>

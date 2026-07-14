@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Inter:wght@300;400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -105,11 +104,14 @@
 
 @layer utilities {
   .glass {
-    @apply bg-card/80 backdrop-blur-xl border border-border/60 shadow-sm;
+    @apply bg-white/45 dark:bg-card/45 backdrop-blur-xl border border-white/45 dark:border-white/5;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04), 
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
   }
 
   .dark .glass {
-    @apply bg-card/60 shadow-none;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25), 
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
   }
 
   .glow-purple {
@@ -139,5 +141,28 @@
 
   .dark .text-gradient {
     background-image: linear-gradient(135deg, hsl(270 80% 75%), hsl(300 60% 70%), hsl(270 90% 85%));
+  }
+
+  .animate-gradient-slow {
+    background-size: 200% 200%;
+    animation: gradient-flow 15s ease infinite;
+  }
+  
+  .bg-gradient-soft {
+    background: linear-gradient(-45deg, 
+      rgba(168, 85, 247, 0.12),
+      rgba(59, 130, 246, 0.12),
+      rgba(236, 72, 153, 0.12),
+      rgba(14, 165, 233, 0.12)
+    );
+  }
+
+  .dark .bg-gradient-soft {
+    background: linear-gradient(-45deg, 
+      rgba(88, 28, 135, 0.20),
+      rgba(30, 58, 138, 0.20),
+      rgba(131, 24, 67, 0.20),
+      rgba(12, 74, 96, 0.20)
+    );
   }
 }
