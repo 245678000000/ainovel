@@ -230,24 +230,38 @@ export const supabase = {
   get auth() {
     const isLocal = localStorage.getItem("is_local_mode") === "true";
     if (isLocal) {
+      const localUser = {
+        id: "local-user-id",
+        aud: "authenticated",
+        role: "authenticated",
+        email: "local-user@ainovel.local",
+        created_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {},
+      };
+      const localSession = {
+        access_token: "local-bypass-token",
+        token_type: "bearer",
+        expires_in: 3600,
+        refresh_token: "local-bypass-refresh",
+        user: localUser,
+      };
+
       return {
-        signInAnonymously: async () => ({ data: { user: { id: "local-user-id" } }, error: null }),
-        signInWithPassword: async () => ({ data: {}, error: null }),
-        signUp: async () => ({ data: {}, error: null }),
+        signInAnonymously: async () => ({ data: { user: localUser, session: localSession }, error: null }),
+        signInWithPassword: async () => ({ data: { user: localUser, session: localSession }, error: null }),
+        signUp: async () => ({ data: { user: localUser, session: localSession }, error: null }),
         signInWithOAuth: async () => ({ data: {}, error: null }),
         signOut: async () => {
           localStorage.removeItem("is_local_mode");
           window.location.reload();
           return { error: null };
         },
-        getSession: async () => ({ data: { session: { user: { id: "local-user-id" } } }, error: null }),
+        getSession: async () => ({ data: { session: localSession }, error: null }),
         onAuthStateChange: (callback: any) => {
           // 延迟触发以匹配 React 挂载周期
           setTimeout(() => {
-            callback("SIGNED_IN", {
-              user: { id: "local-user-id", email: "local-user@ainovel.local" },
-              access_token: "local-bypass-token"
-            });
+            callback("SIGNED_IN", localSession);
           }, 0);
           return { data: { subscription: { unsubscribe: () => {} } } };
         }
