@@ -191,6 +191,65 @@ export default function SettingsPage() {
         return;
       }
 
+      const isLocal = localStorage.getItem("is_local_mode") === "true";
+      if (isLocal) {
+        const providerType = form.provider_type;
+        const isClaude = providerType === "claude";
+        const testBaseUrl = form.api_base_url || selectedType?.defaultUrl || "";
+        const trimmedApiKey = form.api_key.trim();
+
+        const endpoint = isClaude
+          ? buildClaudeMessagesUrl(testBaseUrl)
+          : buildOpenAICompletionsUrl(testBaseUrl);
+
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+
+        if (isClaude) {
+          headers["x-api-key"] = trimmedApiKey;
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers["Authorization"] = `Bearer ${trimmedApiKey}`;
+        }
+
+        const requestBody = isClaude ? {
+          model: form.default_model || "claude-3-5-sonnet-20241022",
+          messages: [{ role: "user", content: "Ping" }],
+          max_tokens: 1,
+        } : {
+          model: form.default_model || "gpt-4o-mini",
+          messages: [{ role: "user", content: "Ping" }],
+          max_tokens: 1,
+        };
+
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(requestBody),
+          });
+
+          if (res.ok) {
+            toast({ title: "✅ 本地直连测试成功", description: "API 响应正常，配置已生效" });
+          } else {
+            const rawText = await res.text();
+            toast({
+              title: "❌ 连接失败",
+              description: `直连 API 报错 [状态码 ${res.status}]: ${rawText.slice(0, 100)}`,
+              variant: "destructive"
+            });
+          }
+        } catch (e: any) {
+          toast({
+            title: "❌ 本地直连失败",
+            description: e.message || "请求发送超时，请确认您的局域网/互联网 API 地址是否可达",
+            variant: "destructive"
+          });
+        }
+        return;
+      }
+
       // 通过后端代发请求，绕过浏览器 CORS 限制
       const edgeUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-novel`;
       const res = await fetch(edgeUrl, {
