@@ -21,7 +21,35 @@ export default function Auth() {
 
   useEffect(() => {
     if (user) navigate("/");
-  }, [user, navigate]);
+  }, [user, navigate]);  const handleAnonymous = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (error) throw error;
+      toast({
+        title: "体验账户创建成功",
+        description: "已通过临时体验身份登录！",
+      });
+      navigate("/");
+    } catch (error: any) {
+      toast({
+        title: "体验登录失败",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLocalMode = () => {
+    localStorage.setItem("is_local_mode", "true");
+    toast({
+      title: "进入本地单机模式",
+      description: "所有设定与小说数据将保存在浏览器本地 localStorage 中，无需登录与配置云端！",
+    });
+    window.location.href = "/";
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,11 +128,31 @@ export default function Auth() {
                 />
               </div>
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "请稍候..." : isLogin ? "登录" : "注册"}
+            <div className="grid grid-cols-2 gap-3">
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "请稍候..." : isLogin ? "登录" : "注册"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                disabled={loading}
+                onClick={handleAnonymous}
+              >
+                免密试用
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-primary/30 text-primary hover:bg-primary/5"
+              disabled={loading}
+              onClick={handleLocalMode}
+            >
+              纯本地单机模式 (无需网络/Supabase)
             </Button>
           </form>
-          <div className="relative my-6">
+          <div className="relative my-4">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t border-border" />
             </div>
@@ -160,3 +208,4 @@ export default function Auth() {
     </div>
   );
 }
+

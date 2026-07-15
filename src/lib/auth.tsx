@@ -25,6 +25,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 检测是否开启了本地单机模式
+    const isLocal = localStorage.getItem("is_local_mode") === "true";
+    if (isLocal) {
+      setSession({
+        access_token: "local-bypass-token",
+        token_type: "bearer",
+        expires_in: 3600,
+        refresh_token: "local-bypass-refresh",
+        user: {
+          id: "local-user-id",
+          aud: "authenticated",
+          role: "authenticated",
+          email: "local-user@ainovel.local",
+          created_at: new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: {},
+        } as any,
+      });
+      setUser({
+        id: "local-user-id",
+        aud: "authenticated",
+        role: "authenticated",
+        email: "local-user@ainovel.local",
+        created_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {},
+      } as any);
+      setLoading(false);
+      return;
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -41,6 +72,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    const isLocal = localStorage.getItem("is_local_mode") === "true";
+    if (isLocal) {
+      localStorage.removeItem("is_local_mode");
+      setSession(null);
+      setUser(null);
+      window.location.reload();
+      return;
+    }
     await supabase.auth.signOut();
   };
 
@@ -56,7 +95,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!loading && !user) {
+    const isLocal = localStorage.getItem("is_local_mode") === "true";
+    if (!loading && !user && !isLocal) {
       navigate("/auth");
     }
   }, [user, loading, navigate]);
@@ -69,6 +109,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!user) return null;
+  const isLocal = localStorage.getItem("is_local_mode") === "true";
+  if (!user && !isLocal) return null;
   return <>{children}</>;
 }
